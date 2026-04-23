@@ -3,6 +3,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+DEFAULT_DATA_ROOT: Path = Path("app") / "data"
+
 
 @dataclass
 class StorageOptions:

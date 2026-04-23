@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py -3.14 --version)",
+      "Bash(py --list)",
+      "Bash(python -m venv .venv)",
+      "Bash(.venv/Scripts/python -m pip install --upgrade pip --quiet)",
+      "Bash(.venv/Scripts/python -m pip install -e \".[dev]\")",
+      "Bash(.venv/Scripts/python -m pytest -v)",
+      "Bash(.venv/Scripts/python -m ruff check src tests)",
+      "Bash(.venv/Scripts/python -m ruff check src tests --fix)",
+      "Bash(.venv/Scripts/python -m pytest)",
+      "Bash(.venv/Scripts/python -m pip install -e \".[app]\")",
+      "Bash(.venv/Scripts/python -m pip install -e \".[app,dev]\")",
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(.venv/Scripts/python -m ruff check src tests examples)",
+      "Bash(.venv/Scripts/python -m ruff check examples)",
+      "Bash(.venv/Scripts/python -m ruff check src tests examples --fix)"
+    ]
+  }
+}

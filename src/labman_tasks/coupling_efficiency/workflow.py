@@ -37,6 +37,15 @@ async def acquire(
                 p_in[i, j] = await pm_in.read_power_w()
                 p_out[i, j] = await pm_out.read_power_w()
             ctx.progress.report((i + 1) / n, f"Point {i + 1}/{n}")
+            ctx.live.publish(
+                "point",
+                {
+                    "index": i,
+                    "setpoint_mw": float(sp),
+                    "p_in_w": float(p_in[i].mean()),
+                    "p_out_w": float(p_out[i].mean()),
+                },
+            )
     finally:
         await laser.set_power_mw(0.0)
         await laser.set_enabled(False)

@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,10 +27,33 @@ class ProgressReporter:
             sink(f, message)
 
 
+class LivePublisher:
+    """Pub/sub channel for intermediate task data.
+
+    Tasks publish typed events by name (e.g. "point", "image", "spectrum");
+    widgets subscribe to specific event names. Synchronous: sinks must be fast
+    (typically a Qt slot that schedules a paint).
+
+    Decoupled from ProgressReporter so progress is always a float and live
+    payloads stay task-specific.
+    """
+
+    def __init__(self) -> None:
+        self._sinks: dict[str, list[Callable[[Any], None]]] = defaultdict(list)
+
+    def subscribe(self, event: str, sink: Callable[[Any], None]) -> None:
+        self._sinks[event].append(sink)
+
+    def publish(self, event: str, payload: Any) -> None:
+        for sink in self._sinks.get(event, ()):
+            sink(payload)
+
+
 @dataclass
 class TaskContext:
     devices: dict[str, Device]
     storage: RunStorage
     progress: ProgressReporter = field(default_factory=ProgressReporter)
+    live: LivePublisher = field(default_factory=LivePublisher)
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger("labman.task"))
     extras: dict[str, Any] = field(default_factory=dict)

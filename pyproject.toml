@@ -30,7 +30,7 @@ dev = [
 coupling_efficiency = "labman_tasks.coupling_efficiency:CouplingEfficiencyTask"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/labman_core", "src/labman_tasks"]
+packages = ["src/labman_core", "src/labman_app", "src/labman_tasks"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

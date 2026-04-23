@@ -6,7 +6,7 @@ deferred. Update this file whenever the answer to any of those changes.
 For *rules and conventions*, see [CLAUDE.md](CLAUDE.md). This document only
 tracks state.
 
-Last updated: 2026-04-22
+Last updated: 2026-04-23
 
 ---
 
@@ -16,45 +16,63 @@ Last updated: 2026-04-22
 - [x] `roles.DeviceRole` (StrEnum: LASER, POWER_METER, CAMERA, SPECTROMETER, STAGE)
 - [x] `schema`: `Range`, `ParamMeta`, `Setable`, `Readable`, `Action`, `DeviceControls`
 - [x] `devices`: `Device`, `LaserSource`, `PowerMeter` Protocols + `LaserState`
-- [x] `storage`: `StorageOptions` (folder / naming "timestamp"|"iterator" / prefix), `RunStorage` (eager dir creation, raw/result/params/meta paths)
-- [x] `context`: `TaskContext`, `ProgressReporter` (subscribable, noop default)
+- [x] `storage`: `StorageOptions`, `RunStorage`, `DEFAULT_DATA_ROOT = Path("app/data")`
+- [x] `context`: `TaskContext`, `ProgressReporter`, `LivePublisher` (pub/sub for intermediate task events; tasks publish typed event names + payloads)
 - [x] `task.Task` Protocol
-- [x] `simulators.SimLaser`, `simulators.SimPowerMeter` (full `controls()` exposed)
+- [x] `shell.ShellServices` Protocol (`device(name)`, `make_storage(task_name, opts)`)
+- [x] `simulators.SimLaser`, `simulators.SimPowerMeter`
+  - SimPowerMeter: float bounded (`wavelength`), choices (`range`, `acq_mode`), int bounded (`averaging`), action with side effect (`calibrate` updates `offset` readable).
+
+### `labman_app`
+- [x] **Committed to PySide6** (6.11).
+- [x] `widgets.SchemaWidget` base — `committed(value)` signal contract, `value()/set_value()` API
+- [x] `widgets.NumericInput` — slider+entry composite when bounds present
+- [x] `widgets.ChoiceInput`, `BoolInput`, `TextInput`, `OptionalWrapper`
+- [x] `forms.build_params_form(cls)` — `(QWidget, getter)` from `Annotated[T, ParamMeta]` dataclasses
+- [x] `forms.build_device_panel(device)` — returns `DevicePanel(widget, setable_widgets, readable_labels, readables)`; three sections (Settings/Readouts/Actions); async commits via running loop
+- [x] `forms.sync_panel_from_device(panel, device)` — one-shot hydrate of setables from device state
+- [x] `forms.poll_readables(panel, interval_s)` — background task updates readable labels at configured rate (5 Hz default)
 
 ### `labman_tasks.coupling_efficiency`
-- [x] `params.CouplingEfficiencyParams` (with `Annotated[T, ParamMeta]` schema)
+- [x] `params.CouplingEfficiencyParams` (`Annotated[T, ParamMeta]` schema)
 - [x] `result.CouplingEfficiencyRawData`, `CouplingEfficiencyResult`
-- [x] `workflow.acquire()` (async, hardware IO only, try/finally cleanup)
+- [x] `workflow.acquire()` (async, hardware IO only, try/finally cleanup, publishes `point` events to `ctx.live`)
 - [x] `analysis.analyze()` (pure function, NaN-safe)
-- [x] `task.CouplingEfficiencyTask` (glue + HDF5/JSON persistence)
+- [x] `task.CouplingEfficiencyTask` (glue + HDF5/JSON/meta persistence)
+- [x] `plots.py` — pyqtgraph two-plot stack (powers + efficiency), `make_plots`, `update_live`, `show_result`, `clear_plots`
+- [x] `widget.CouplingEfficiencyWidget` — three-column layout (Equipment | Experiment | Graphics), Start/Stop/progress, async run lifecycle, live plot updates from `point` events, hydrate + poll on `initialize()`, `shutdown()` cancels poll + run tasks
 - [x] Entry-point registered in `pyproject.toml`
 
-### Tests (12 passing)
-- [x] Storage path layout: default, prefix, iterator, custom folder
-- [x] Analysis: known ratio, correction factor scaling, NaN at zero input
-- [x] Workflow E2E: file outputs, raw round-trip, params persistence, progress events, laser cleanup
+### Tests (46 passing)
+- [x] Storage: 4 tests
+- [x] Analysis: 3 tests
+- [x] Workflow E2E: 5 tests
+- [x] SimPowerMeter: 5 tests
+- [x] Widgets: 12 tests
+- [x] Forms: 12 tests (incl. hydrate sync, readable polling)
+- [x] Coupling-efficiency widget: 5 tests (E2E run + persistence, progress→bar, cancellation cleanup, hydrate-on-init, LivePublisher dispatch)
 
-### Tooling
-- [x] `pyproject.toml` (hatchling, numpy, h5py, pytest-asyncio, ruff)
-- [x] `.gitignore` (incl. `app/data/`, `app/presets/`, `*.h5`)
-- [x] `CLAUDE.md` — architecture and conventions
-- [x] `STATUS.md` — this file
+### Tooling / Examples
+- [x] `pyproject.toml` (hatchling, numpy, h5py, pytest-asyncio, ruff, `[app]` extra: PySide6 / qasync / pyqtgraph)
+- [x] `.gitignore`, `CLAUDE.md`, `STATUS.md`
+- [x] `tests/conftest.py` — session-scoped `qapp` fixture
+- [x] `examples/coupling_efficiency_demo.py` — full task widget against simulators + qasync loop. `DemoShell` is a stub `ShellServices`; the real shell will replace it.
 
 ---
 
 ## Next up (uncommitted, logical next slice)
 
-The renderer + Qt shell, in roughly this order:
+The Qt shell — host application that discovers tasks, binds devices to roles, and launches task widgets:
 
-- [ ] **Pick PyQt6 vs PySide6 finally** (currently leaning PySide6, not yet code-committed)
-- [ ] `labman_app/widgets/numeric_input.py` — composite slider+entry with bounds & unit
-- [ ] `labman_app/widgets/enum_input.py`, `bool_input.py`, `text_input.py`
-- [ ] `labman_app/forms.build_params_form(cls) -> (QWidget, getter)` — walks `Annotated[T, ParamMeta]`, infers widget from type+bounds
-- [ ] `labman_app/forms.build_device_panel(device) -> QWidget` — walks `device.controls()`, renders setables/readables/actions sections
-- [ ] `labman_app/shell` — Qt main window, task registry (entry-point discovery), device-binding UI
-- [ ] `labman_tasks/coupling_efficiency/widget.py` — first concrete task widget using the above
-- [ ] `labman_tasks/coupling_efficiency/plots.py` — efficiency vs setpoint, p_in/p_out overlay
-- [ ] `qasync` integration in shell (Start button → `asyncio.create_task(task.run_headless(...))`)
+- [ ] `labman_app/shell.py` — main window with task picker (sidebar/tab) and active task widget area
+- [ ] Task discovery via Python entry points (`importlib.metadata.entry_points(group="labman.tasks")`)
+- [ ] `lab.yaml` config loader — declares connected devices (driver class, address, sync policy)
+- [ ] Device registry that loads drivers from `lab.yaml`, instantiates and connects them at startup
+- [ ] Real `ShellServices` implementation backed by the device registry
+- [ ] Device-binding UI — for each task's `required_bindings`, dropdown to pick from available devices of the matching role; remembered per task
+- [ ] Connect-time sync policy implementation (`hydrate` | `push_defaults` | `skip`)
+- [ ] Resource manager — enforces single-connection-per-device when shell starts
+- [ ] Splash/error reporting for failed device connects
 
 ---
 
@@ -63,26 +81,20 @@ The renderer + Qt shell, in roughly this order:
 ### Core
 - [ ] `Camera`, `Spectrometer`, `Stage` Protocols
 - [ ] Sim devices for each (`SimCamera`, `SimSpectrometer`, `SimStage`)
-- [ ] `lab.yaml` config loader (binds device drivers + addresses + sync policy)
-- [ ] Connect-time sync policy (`hydrate` | `push_defaults` | `skip`) implementation
-- [ ] Resource manager — enforces single-connection-per-device
-- [ ] Readable polling subsystem (per-device poll rate from config)
 
 ### App
 - [ ] `PresetStore` (per-task JSON; `__last_used__` auto-update; named save/load/delete)
 - [ ] Preset bar widget above params form
-- [ ] Live plot widget (pyqtgraph) used by tasks during acquire
-- [ ] Detachable task windows (so a task feels standalone)
+- [ ] Detachable task windows
 - [ ] Status bar, log viewer, error dialog
 
 ### Tasks (other three)
-- [ ] `beam_profile` — camera images over laser settings + z-positions → fitted parameters
-- [ ] `power_spectrum` — laser power ramp → spectra per setpoint
-- [ ] `spectral_feature_tracking` — dark → reference → acquire → track feature
+- [ ] `beam_profile`
+- [ ] `power_spectrum`
+- [ ] `spectral_feature_tracking` (dark → reference → acquire → track)
 
 ### Cross-cutting
-- [ ] Generic HDF5 persistence helper in `labman_core` (lift from `coupling_efficiency/task.py` when 2nd task duplicates it)
-- [ ] Cancellation test (cancel mid-`acquire`, assert laser still cleaned up)
+- [ ] Generic HDF5 persistence helper in `labman_core` (lift when 2nd task duplicates `coupling_efficiency/task.py`)
 - [ ] Bump `requires-python` back to `>=3.14` once 3.14 is installed locally
 
 ---
@@ -90,19 +102,17 @@ The renderer + Qt shell, in roughly this order:
 ## Deferred (deliberately skipped, with reason)
 
 - **`pint` / units library** — string units on `ParamMeta`/`Setable` are sufficient for now; SI internally everywhere. Revisit only if a real ambiguity forces it.
-- **Splitting into three distributable packages** (`labman-core`, `labman-app`, `labman-tasks`) — single repo with `src/labman_core/` and `src/labman_tasks/` is enough at this stage. Logical boundary (no Qt in core) enforced by code, not packaging. Split when there's a concrete reason (third-party publishing, multi-machine deploys).
-- **Instrument profiles** (cross-device preset concept like "1550 nm alignment") — task presets first; instrument profiles can come later once the basic mechanism is proven.
-- **Mocking devices vs simulators** — committed to simulators only. No mocks in tests.
-- **Type checker (mypy/pyright) wiring** — ruff lint-only for now; revisit after Qt code lands and the surface stabilises.
+- **Splitting into three distributable packages** (`labman-core`, `labman-app`, `labman-tasks`) — single repo is enough at this stage. Logical boundary enforced by code, not packaging. Split when there's a concrete reason (third-party publishing, multi-machine deploys).
+- **Instrument profiles** (cross-device preset concept like "1550 nm alignment") — task presets first; instrument profiles later.
+- **Mocking devices vs simulators** — committed to simulators only.
+- **Type checker (mypy/pyright) wiring** — ruff lint-only for now; revisit after the shell stabilises.
 
 ---
 
 ## Open questions
 
-- **PyQt6 vs PySide6** — leaning PySide6 (LGPL, Qt Company official). Final commit happens at first `from PySide6.x import y` line.
-- **Live device-panel updates when *we* change state** (e.g. an action button updates a related readable) — re-poll the affected readable, or expose a `changed` notify hook on `Setable`/`Action`? Decide when the first device panel ships.
-- **What `ShellServices` looks like** (the object passed to `Task.build_widget`) — needs at minimum: `device(binding_name)`, access to `PresetStore`, `RunStorage` factory. Shape will firm up while building the shell.
-- **Cross-task dataset linking** (e.g. "this beam-profile run used the laser settings from coupling-efficiency run X") — likely just a `parent_run` field in `meta.json`; not yet designed.
+- **Cross-task dataset linking** (e.g. "this beam-profile run used the laser settings from coupling-efficiency run X") — likely a `parent_run` field in `meta.json`; not yet designed.
+- **Action-induced readable refresh** — currently readables only update on the polling tick. If an action like `calibrate` updates `offset`, you wait up to 200 ms to see it. Acceptable, or do we want immediate refresh after action completion? Decide if it becomes annoying.
 
 ---
 

@@ -7,3 +7,4 @@ class DeviceRole(StrEnum):
     CAMERA = "camera"
     SPECTROMETER = "spectrometer"
     STAGE = "stage"
+    ALIGNER = "aligner"

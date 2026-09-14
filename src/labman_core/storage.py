@@ -74,14 +74,24 @@ class RunStorage:
             day_dir.mkdir(parents=True, exist_ok=True)
             stamp = now.strftime("%Y%m%dT%H%M%S")
             leaf = f"{self.opts.prefix}{stamp}" if self.opts.prefix else stamp
-            run_dir = day_dir / leaf
-        elif self.opts.naming == "iterator":
+            return self._make_unique(day_dir, leaf)
+        if self.opts.naming == "iterator":
             run_dir = base / self._next_iterator_leaf(base, self.opts.prefix)
-        else:
-            raise ValueError(f"Unknown naming mode: {self.opts.naming!r}")
+            run_dir.mkdir(parents=True, exist_ok=False)
+            return run_dir
+        raise ValueError(f"Unknown naming mode: {self.opts.naming!r}")
 
-        run_dir.mkdir(parents=True, exist_ok=False)
-        return run_dir
+    @staticmethod
+    def _make_unique(parent: Path, leaf: str) -> Path:
+        """Create parent/leaf, or leaf_1, leaf_2, ... when runs start within the same second."""
+        suffix = 0
+        while True:
+            run_dir = parent / (leaf if suffix == 0 else f"{leaf}_{suffix}")
+            try:
+                run_dir.mkdir(parents=True, exist_ok=False)
+                return run_dir
+            except FileExistsError:
+                suffix += 1
 
     @staticmethod
     def _next_iterator_leaf(base: Path, prefix: str) -> str:

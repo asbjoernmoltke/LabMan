@@ -78,7 +78,10 @@ changes to `safety.py` and `to_safe_state` paths with extra care.
 
 1. **Every task has a `safety.py`** with an `async def to_safe_state(devices)`
    function. It defines what "safe" means for that task's hardware combination
-   (e.g. coupling efficiency: laser power = 0, laser disabled).
+   (e.g. coupling efficiency: laser power = 0, laser disabled). It may take
+   optional keyword arguments the workflow supplies (auto-alignment: `hold_at`,
+   the position to latch at), but `Task.to_safe_state(devices)` must work
+   without them.
 2. **Every task implements `Task.to_safe_state(devices)`** as a thin delegate
    to its `safety.py` function.
 3. **`to_safe_state` MUST be idempotent.** Callable any number of times in any
@@ -137,12 +140,14 @@ Overrides via `StorageOptions(folder, naming, prefix)`:
 - `prefix: str` — prepended to the leaf directory name; default `""`.
 
 `RunStorage` is the only writer. Tasks never construct paths themselves.
+Generic writers (dataclass ↔ HDF5, params JSON, meta JSON) live in
+`labman_core.persistence`; `task.py` calls them with `RunStorage` paths.
 
 ## Device roles & binding
 
 ```python
 class DeviceRole(str, Enum):
-    LASER, POWER_METER, CAMERA, SPECTROMETER, STAGE = ...
+    LASER, POWER_METER, CAMERA, SPECTROMETER, STAGE, ALIGNER = ...
 ```
 
 Tasks declare **binding-name → role**, not a flat set:
@@ -289,7 +294,14 @@ to last-known-good and surface error. No "Apply" button, no dirty-state tracking
   event loop.
 - Blocking vendor SDK calls go through `asyncio.to_thread(...)`.
 - Cancellation propagates naturally via `asyncio.CancelledError` at `await`
-  points. Stop button calls `.cancel()` on the workflow task.
+  points. For finite runs, Stop calls `.cancel()` on the workflow task.
+- Open-ended workflows (e.g. continuous tracking) end gracefully on
+  `ctx.request_stop()`: they check `ctx.stop_requested` between steps and
+  return normally, so raw data is persisted. Their widgets map Stop to
+  `request_stop()` and a second Stop to `.cancel()` (data from that run is lost;
+  safe state still runs).
+- Workflow loops must await something every iteration (even `asyncio.sleep(0)`)
+  so simulators that never block don't starve the Qt event loop.
 - `ctx.progress.report(fraction, message)` for progress updates.
 
 ## Testing
@@ -314,7 +326,10 @@ Defined in `labman-core`:
 - `Setable`, `Readable`, `Action`, `DeviceControls` — device introspection
 - `StorageOptions(folder, naming, prefix)` — per-run path overrides
 - `RunStorage` — owns a run directory; produces raw/result/params/meta paths
-- `TaskContext(devices, storage, progress, logger)` — what tasks receive at run time
+- `TaskContext(devices, storage, progress, live, logger)` — what tasks receive at run
+  time; `request_stop()` / `stop_requested` for graceful stop
+- `Aligner` protocol — two piezo output voltages (V) + detector reading + `latch()`
+  (Thorlabs K-Cube NanoTrak via `labman_core.drivers.KinesisNanoTrak`)
 - `Task` protocol — `name`, `display_name`, `required_bindings`, `params_cls`,
   `build_widget(shell)`, `run_headless(ctx, params)`
 

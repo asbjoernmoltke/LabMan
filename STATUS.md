@@ -6,7 +6,7 @@ deferred. Update this file whenever the answer to any of those changes.
 For *rules and conventions*, see [CLAUDE.md](CLAUDE.md). This document only
 tracks state.
 
-Last updated: 2026-09-14 (presets)
+Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 
 ---
 
@@ -64,8 +64,21 @@ Last updated: 2026-09-14 (presets)
 - [x] `widget.CouplingEfficiencyWidget` — three-column layout, Start/Stop/progress, async run lifecycle, live plot updates, hydrate + poll on `initialize()`, **friendly status for `AbortConditionMet`**, live buffers initialised in `__init__` (not just on Start), params form from the shell (presets), reports successful runs
 - [x] Entry-point registered in `pyproject.toml`
 
-### Tests (176 passing)
-- [x] Storage: 4 tests
+### `labman_tasks.auto_alignment` (Thorlabs KNA-IR fiber-incoupling alignment)
+- [x] Core: `DeviceRole.ALIGNER`, `Aligner` protocol + `SignalReading`; `TaskContext.request_stop()` / `stop_requested` for graceful stop
+- [x] `simulators.SimAligner` — donut (dip inside bright ring) or bowl profile, drift, noise, voltage-range checks
+- [x] `drivers.KinesisNanoTrak` — Kinesis C API via ctypes; keeps the KNA latched (firmware tracking maximizes and is never enabled); verifies but never changes the 75/150 V range; blocking calls in a worker thread; shutdown latches without zeroing outputs
+- [x] `persistence` (core) — dataclass ↔ HDF5 (nested, None, bool/int/str attrs), params/meta JSON; used by `auto_alignment` (coupling efficiency not migrated yet)
+- [x] `algorithm.py` (pure) — probe circle, plane fit + curvature, Newton step toward the dip only when the centre is confirmed lower than its ring; holds on ring/flat/out-of-range/degenerate; excursion and voltage limits; serpentine map raster
+- [x] `workflow.py` — map mode (returns to start) and continuous track mode (until Stop, duration, or a limit); every sample and cycle logged and published live; `finally` → safe state
+- [x] `safety.py` — latch, then move to `hold_at` (best confirmed centre when tracking, start after a map); never zeroes outputs
+- [x] `analysis.py` — map grid; nearest dip = downhill walk from the start (the global minimum can be background beyond the ring and is reported separately); `dip_found` false when the walk runs off the map edge; radial profile in one-grid-step rings + advisory `profile_shape`; tracking summary (cycles, in-dip fraction, drift, best)
+- [x] `plots.py` / `widget.py` — position plane (live samples coloured by signal, centre trajectory, start/best markers, map heatmap) + signal vs time; Stop = graceful, second Stop = force; `labman_app.widgets.layout` column helpers
+- [x] `examples/lab.sim.yaml` gains a simulated aligner; `examples/lab.kna.yaml` template for the real KNA
+- [x] Fixes found by the smoke test: `RunStorage` timestamp dirs no longer collide when two runs start within one second; both task widgets create storage inside `try`, so a storage error resets the UI instead of leaving Start disabled
+
+### Tests (244 passing)
+- [x] Storage: 5 tests (incl. runs started in the same second get `_1`, `_2` suffixes)
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
 - [x] SimPowerMeter: 8 tests (incl. negative reads after calibrate, negative noise samples not clipped, display_precision present)
@@ -73,6 +86,13 @@ Last updated: 2026-09-14 (presets)
 - [x] Forms: 23 tests (incl. hydrate sync, readable polling, sub-precision suppression, sync policies, setter validation + rollback, field-named errors, last-used seeding)
 - [x] Presets: 25 tests (params ↔ dict round trip and type coercion/rejection, store save/load/delete, last-used separation, reserved names, corrupt file set aside)
 - [x] Preset bar: 10 tests (round trip, name dialog, overwrite/delete confirmation, reserved name, invalid form, invalid preset leaves form unchanged, unknown fields reported, last-used entry)
+- [x] SimAligner: 10 tests (profiles, bounds, drift, noise, controls)
+- [x] Auto-alignment algorithm: 12 tests (Newton step, gain/clip, steps inside donut dip, holds on ring/flat/out-of-range/degenerate, clipped probes, limits, serpentine map)
+- [x] Auto-alignment workflow + safety: 13 tests (map saves/returns to start, saved raw re-analyzes identically, stop during map, tracking converges and latches at best, follows drift, holds on ring, excursion limit, duration, cancellation, device error, safe state idempotent/non-raising, task delegate latches in place)
+- [x] Auto-alignment analysis: 10 tests (dip_in_ring / minimum / maximum / flat classification, coarse offset map finds nearest dip not background beyond ring, downhill walk, missing points, track summary)
+- [x] Auto-alignment widget: 5 tests (map run, graceful stop saves, second Stop force-cancels, hydrate, storage failure reports error and resets UI)
+- [x] Persistence: 4 tests (nested round trip incl. None/bool/empty arrays, unsupported type, params and meta JSON)
+- [x] KinesisNanoTrak (fake DLL): 13 tests (connect latches, simulator flag, voltage-range refusal closes device, open error, V ↔ device units, out-of-range move never sent, range flag, latch/identify/idempotent shutdown, controls, example yaml)
 - [x] Coupling-efficiency widget: 5 tests
 - [x] Coupling-efficiency safety: 8 tests (idempotency, missing laser, abort raises + cleans up, abort doesn't trigger when efficiency above threshold, safety on normal completion, safety on unhandled workflow error)
 - [x] Lab config: 12 tests (round trip, full config, bad version/role/sync_policy, missing driver, defaults/push_defaults rules, resource validation + duplicates)
@@ -93,11 +113,13 @@ Last updated: 2026-09-14 (presets)
 
 ## Next up (logical next slice)
 
-Second task, `beam_profile` — the first real test of "each new measurement is small to add":
+KNA-IR hardware bring-up for `auto_alignment` (everything so far is verified against simulators and a fake Kinesis DLL only):
 
-- [ ] `Camera` + `Stage` Protocols and `SimCamera` / `SimStage` (see Planned → Core)
-- [ ] `beam_profile` task folder per the standard layout, incl. `safety.py`
-- [ ] Lift the generic HDF5 persistence helper out of `coupling_efficiency/task.py` (see Planned → Cross-cutting)
+- [ ] Connect the KNA, set both HV outputs to 150 V in Kinesis, fill the serial into `examples/lab.kna.yaml`
+- [ ] Verify on hardware: `NT_SetCircleHomePosition` + `NT_HomeCircle` actually moves the output while latched; `absoluteReading` is in A; read latency vs `read_delay_s` / `poll_ms`
+- [ ] Run a **map** around the hand-aligned point and check `profile_shape` — confirms (or refutes) the dip-inside-ring picture before trusting tracking
+- [ ] Tune `probe_radius_v` together with `min_contrast` (dip contrast scales with radius²), then `gain` / `max_step_v`
+- [ ] Consider periodic raw checkpoints for very long tracking runs (today a force-stop or crash loses that run's log)
 
 ---
 
@@ -118,7 +140,9 @@ Second task, `beam_profile` — the first real test of "each new measurement is 
 - [ ] `spectral_feature_tracking` (dark → reference → acquire → track)
 
 ### Cross-cutting
-- [ ] Generic HDF5 persistence helper in `labman_core` (lift when 2nd task duplicates `coupling_efficiency/task.py`)
+- [ ] Migrate `coupling_efficiency/task.py` to `labman_core.persistence` (helper exists, used by `auto_alignment`)
+- [ ] Migrate `CouplingEfficiencyWidget` to `labman_app.widgets.layout` helpers
+- [ ] Second measurement task `beam_profile` (needs `Camera` + `Stage` protocols and simulators)
 - [ ] Bump `requires-python` back to `>=3.14` once 3.14 is installed locally
 
 ---
@@ -137,6 +161,7 @@ Second task, `beam_profile` — the first real test of "each new measurement is 
 
 - **Cross-task dataset linking** (e.g. "this beam-profile run used the laser settings from coupling-efficiency run X") — likely a `parent_run` field in `meta.json`; not yet designed.
 - **Action-induced readable refresh** — currently readables only update on the polling tick. If an action like `calibrate` updates `offset`, you wait up to 200 ms to see it. Acceptable, or do we want immediate refresh after action completion?
+- **Auto-alignment signal shape** — the dip-inside-ring picture is unconfirmed; run a map on the real setup first. Far outside the ring the signal tail is also locally convex, so tracking there would step *away*; `max_excursion_v` is the guard for that case.
 - **Cross-machine exclusivity** — resource locks live in the local temp dir, so two PCs sharing one LAN/GPIB instrument are not detected. Needs a shared lock location or an instrument-side check if that setup occurs.
 
 ---

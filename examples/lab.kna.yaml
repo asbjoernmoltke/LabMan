@@ -1,0 +1,22 @@
+# Real Thorlabs KNA-IR (K-Cube NanoTrak) for fiber-incoupling auto-alignment.
+#
+# Before first use:
+#   1. In the Kinesis app, set both HV outputs to the 150 V range, then close
+#      Kinesis (only one program can hold the device).
+#   2. Replace both serial numbers below with the one on the K-Cube label.
+#
+# Run from repo root:
+#     python -m labman_app --lab examples/lab.kna.yaml
+#
+# To try the driver without hardware, configure a KNA101 in the Kinesis
+# Simulator and add `simulation: true` under args.
+version: 1
+devices:
+  aligner:
+    driver: labman_core.drivers.KinesisNanoTrak
+    role: aligner
+    resource: "kinesis:REPLACE_WITH_SERIAL"
+    args:
+      serial_no: "REPLACE_WITH_SERIAL"
+      max_voltage_v: 150
+    sync_policy: hydrate

@@ -24,6 +24,15 @@ def test_timestamp_with_prefix(tmp_path: Path) -> None:
     assert s.root.name == "cal_20260422T143022"
 
 
+def test_runs_started_in_the_same_second_get_distinct_dirs(tmp_path: Path) -> None:
+    fixed = datetime(2026, 4, 22, 14, 30, 22, tzinfo=UTC)
+    runs = [RunStorage("t", StorageOptions(), tmp_path, clock=lambda: fixed) for _ in range(3)]
+    assert [r.root.name for r in runs] == [
+        "20260422T143022", "20260422T143022_1", "20260422T143022_2"
+    ]
+    assert all(r.root.is_dir() for r in runs)
+
+
 def test_iterator_naming(tmp_path: Path) -> None:
     opts = StorageOptions(naming="iterator", prefix="run_")
     s1 = RunStorage("t", opts, tmp_path)

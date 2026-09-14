@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Callable
@@ -57,3 +58,17 @@ class TaskContext:
     live: LivePublisher = field(default_factory=LivePublisher)
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger("labman.task"))
     extras: dict[str, Any] = field(default_factory=dict)
+    stop_event: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def request_stop(self) -> None:
+        """Ask an open-ended workflow to finish gracefully and return its data.
+
+        Distinct from cancellation: a stopped workflow returns normally, so raw
+        data is persisted. Workflows that run until stopped check
+        `stop_requested` between steps.
+        """
+        self.stop_event.set()
+
+    @property
+    def stop_requested(self) -> bool:
+        return self.stop_event.is_set()

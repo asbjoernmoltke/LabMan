@@ -77,7 +77,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] `examples/lab.sim.yaml` gains a simulated aligner; `examples/lab.kna.yaml` template for the real KNA
 - [x] Fixes found by the smoke test: `RunStorage` timestamp dirs no longer collide when two runs start within one second; both task widgets create storage inside `try`, so a storage error resets the UI instead of leaving Start disabled
 
-### Tests (244 passing)
+### Tests (247 passing)
 - [x] Storage: 5 tests (incl. runs started in the same second get `_1`, `_2` suffixes)
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
@@ -92,7 +92,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] Auto-alignment analysis: 10 tests (dip_in_ring / minimum / maximum / flat classification, coarse offset map finds nearest dip not background beyond ring, downhill walk, missing points, track summary)
 - [x] Auto-alignment widget: 5 tests (map run, graceful stop saves, second Stop force-cancels, hydrate, storage failure reports error and resets UI)
 - [x] Persistence: 4 tests (nested round trip incl. None/bool/empty arrays, unsupported type, params and meta JSON)
-- [x] KinesisNanoTrak (fake DLL): 13 tests (connect latches, simulator flag, voltage-range refusal closes device, open error, V ↔ device units, out-of-range move never sent, range flag, latch/identify/idempotent shutdown, controls, example yaml)
+- [x] KinesisNanoTrak (fake DLL): 16 tests (connect latches, simulator flag, voltage-range refusal closes device, open error, V ↔ device units, out-of-range move never sent, range flag, garbage reading retried / persistent → NaN out of range / constant scale mismatch and dark readings accepted, latch/identify/idempotent shutdown, controls, example yaml)
 - [x] Coupling-efficiency widget: 5 tests
 - [x] Coupling-efficiency safety: 8 tests (idempotency, missing laser, abort raises + cleans up, abort doesn't trigger when efficiency above threshold, safety on normal completion, safety on unhandled workflow error)
 - [x] Lab config: 12 tests (round trip, full config, bad version/role/sync_policy, missing driver, defaults/push_defaults rules, resource validation + duplicates)
@@ -115,8 +115,11 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 
 KNA-IR hardware bring-up for `auto_alignment` (everything so far is verified against simulators and a fake Kinesis DLL only):
 
-- [ ] Connect the KNA, set both HV outputs to 150 V in Kinesis, fill the serial into `examples/lab.kna.yaml`
-- [ ] Verify on hardware: `NT_SetCircleHomePosition` + `NT_HomeCircle` actually moves the output while latched; `absoluteReading` is in A; read latency vs `read_delay_s` / `poll_ms`
+- [x] Connected KNA-IR S/N 57535374 through LabMan's driver (2026-09-14): 150 V range verified, latch mode, feedback source TIA, outputs at H 74.6 V / V 75.3 V after hand alignment; serial in `examples/lab.kna.yaml`
+- [x] Readings: no delay returns the same stale value; ≥30 ms gives fresh ones → default `read_delay_s` 50 ms (~50 ms per reading). Occasional garbage `absoluteReading` (~1e-38 with a normal relative value) → driver cross-checks against relative × range, retries, else returns NaN flagged out of range
+- [ ] Verify that `NT_SetCircleHomePosition` + `NT_HomeCircle` moves the output while latched (one tiny step and back)
+- [ ] Units: `absoluteReading` ≈ 0.36 × (relative/32767 × range full scale) on every reading — confirm absolute is in A (e.g. a known photocurrent) or correct the scale. Tracking only needs monotonic signal, but stored values may be off by a constant factor
+- [ ] Auto-ranging is on (status bit 0x10): range switches mid-probe add steps and delay; consider a fixed TIA range during map/track
 - [ ] Run a **map** around the hand-aligned point and check `profile_shape` — confirms (or refutes) the dip-inside-ring picture before trusting tracking
 - [ ] Tune `probe_radius_v` together with `min_contrast` (dip contrast scales with radius²), then `gain` / `max_step_v`
 - [ ] Consider periodic raw checkpoints for very long tracking runs (today a force-stop or crash loses that run's log)

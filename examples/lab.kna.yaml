@@ -3,7 +3,8 @@
 # Before first use:
 #   1. In the Kinesis app, set both HV outputs to the 150 V range, then close
 #      Kinesis (only one program can hold the device).
-#   2. Replace both serial numbers below with the one on the K-Cube label.
+#   2. Serial numbers below are for the lab's KNA-IR (S/N 57535374); change
+#      both if you use a different unit.
 #
 # Run from repo root:
 #     python -m labman_app --lab examples/lab.kna.yaml
@@ -15,8 +16,8 @@ devices:
   aligner:
     driver: labman_core.drivers.KinesisNanoTrak
     role: aligner
-    resource: "kinesis:REPLACE_WITH_SERIAL"
+    resource: "kinesis:57535374"
     args:
-      serial_no: "REPLACE_WITH_SERIAL"
+      serial_no: "57535374"
       max_voltage_v: 150
     sync_policy: hydrate

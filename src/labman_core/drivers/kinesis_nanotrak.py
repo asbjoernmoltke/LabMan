@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import logging
+import math
 import os
 import threading
 import time
@@ -36,6 +37,15 @@ NT_IN_RANGE = 0x0001
 KNA_CH1_150V = 0x01
 KNA_CH2_150V = 0x10
 WORD_MAX = 65535
+RELATIVE_FULL = 32767
+
+# KNA_TIARange code -> full-scale current (A), from the Kinesis header. Used only to
+# sanity-check absoluteReading against relativeReading, so a constant scale mismatch
+# (seen on hardware: absolute ≈ 0.36 × relative·full-scale) is tolerated.
+TIA_FULL_SCALE_A = {
+    3: 5e-9, 4: 16.6e-9, 5: 50e-9, 6: 166e-9, 7: 500e-9, 8: 1.66e-6, 9: 5e-6,
+    10: 16.6e-6, 11: 50e-6, 12: 166e-6, 13: 500e-6, 14: 1.66e-3, 15: 5e-3,
+}
 
 
 class KinesisError(RuntimeError):
@@ -64,7 +74,8 @@ class KinesisNanoTrak:
         name: str = "nanotrak",
         max_voltage_v: float = 150.0,
         poll_ms: int = 20,
-        read_delay_s: float = 0.03,
+        read_delay_s: float = 0.05,
+        read_retries: int = 2,
         startup_wait_s: float = 0.5,
         kinesis_dir: str | Path = DEFAULT_KINESIS_DIR,
         simulation: bool = False,
@@ -76,7 +87,10 @@ class KinesisNanoTrak:
         self._serial = str(serial_no).encode("ascii")
         self._max_v = float(max_voltage_v)
         self._poll_ms = int(poll_ms)
+        # Hardware bring-up (S/N 57535374): with no delay the same stale value comes
+        # back; ≥30 ms gives fresh readings.
         self._read_delay_s = float(read_delay_s)
+        self._read_retries = int(read_retries)
         self._startup_wait_s = float(startup_wait_s)
         self._lock = threading.Lock()
         self._lib = _lib if _lib is not None else _load_library(Path(kinesis_dir))
@@ -221,17 +235,32 @@ class KinesisNanoTrak:
             self._check(self._lib.NT_HomeCircle(self._serial), "NT_HomeCircle")
 
     def _read_signal_sync(self) -> SignalReading:
-        reading = TIAReading()
-        with self._lock:
-            self._check(self._lib.NT_RequestReading(self._serial), "NT_RequestReading")
-            time.sleep(self._read_delay_s)
-            self._check(
-                self._lib.NT_GetReading(self._serial, ctypes.byref(reading)), "NT_GetReading"
+        """One detector reading; retried if implausible.
+
+        On hardware the DLL occasionally returns a garbage absoluteReading (~1e-38)
+        alongside a normal relativeReading. Passed through, that looks like a
+        perfect dip. If retries don't help, return NaN flagged out of range so the
+        tracker holds instead of acting on it.
+        """
+        for attempt in range(self._read_retries + 1):
+            reading = TIAReading()
+            with self._lock:
+                self._check(self._lib.NT_RequestReading(self._serial), "NT_RequestReading")
+                time.sleep(self._read_delay_s)
+                self._check(
+                    self._lib.NT_GetReading(self._serial, ctypes.byref(reading)), "NT_GetReading"
+                )
+            if _reading_is_plausible(reading):
+                return SignalReading(
+                    signal_a=float(reading.absoluteReading),
+                    in_range=reading.underOrOverRead == NT_IN_RANGE,
+                )
+            logger.warning(
+                "discarding implausible KNA reading %.3g (relative %d, range %d), attempt %d",
+                reading.absoluteReading, reading.relativeReading, reading.selectedRange,
+                attempt + 1,
             )
-        return SignalReading(
-            signal_a=float(reading.absoluteReading),
-            in_range=reading.underOrOverRead == NT_IN_RANGE,
-        )
+        return SignalReading(signal_a=math.nan, in_range=False)
 
     def _call(self, function: str, *args: Any) -> None:
         with self._lock:
@@ -275,6 +304,19 @@ class KinesisNanoTrak:
 
     async def _get_signal(self) -> float:
         return (await self.read_signal()).signal_a
+
+
+def _reading_is_plausible(reading: TIAReading) -> bool:
+    """absoluteReading must be finite and, when relativeReading is at least 1 % of the
+    range, within three orders of magnitude of relative × range full scale."""
+    absolute = float(reading.absoluteReading)
+    if not math.isfinite(absolute):
+        return False
+    full_scale = TIA_FULL_SCALE_A.get(int(reading.selectedRange))
+    if full_scale is None or reading.relativeReading < RELATIVE_FULL // 100:
+        return True  # nothing to cross-check against (unknown range or near-dark)
+    expected = reading.relativeReading / RELATIVE_FULL * full_scale
+    return 1e-3 * expected <= absolute <= 1e3 * expected
 
 
 def _load_library(kinesis_dir: Path) -> ctypes.CDLL:

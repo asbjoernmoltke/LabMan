@@ -7,9 +7,12 @@ QApplication. Nothing here imports Qt.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from importlib.metadata import entry_points
 from pathlib import Path
+from typing import Any
 
+from labman_app.presets import PresetStore
 from labman_core.devices import Device
 from labman_core.lab_config import DeviceSync
 from labman_core.registry import DeviceRegistry
@@ -119,17 +122,22 @@ def validate_bindings(
 
 
 class RegistryShellServices:
-    """`ShellServices` for one opened task: binding names resolve through the registry."""
+    """`ShellServices` for one opened task: binding names resolve through the registry.
+
+    `presets_root=None` disables presets (plain params form, no last-used updates).
+    """
 
     def __init__(
         self,
         registry: DeviceRegistry,
         bindings: dict[str, str],
         data_root: Path = DEFAULT_DATA_ROOT,
+        presets_root: Path | None = None,
     ) -> None:
         self._registry = registry
         self._bindings = dict(bindings)
         self._data_root = Path(data_root)
+        self._presets_root = Path(presets_root) if presets_root is not None else None
 
     @property
     def bindings(self) -> dict[str, str]:
@@ -148,3 +156,21 @@ class RegistryShellServices:
         self, task_name: str, opts: StorageOptions | None = None
     ) -> RunStorage:
         return RunStorage(task_name, opts or StorageOptions(), self._data_root)
+
+    def params_form(self, task_name: str, params_cls: type) -> tuple[Any, Callable[[], Any]]:
+        # Imported here so this module stays importable without Qt.
+        from labman_app.forms import build_params_form, build_params_form_with_presets
+
+        if self._presets_root is None:
+            return build_params_form(params_cls)
+        return build_params_form_with_presets(
+            params_cls, PresetStore(task_name, self._presets_root)
+        )
+
+    def run_succeeded(self, task_name: str, params: Any) -> None:
+        if self._presets_root is None:
+            return
+        try:
+            PresetStore(task_name, self._presets_root).save_last_used(params)
+        except OSError:
+            logger.warning("could not save last-used params for %r", task_name, exc_info=True)

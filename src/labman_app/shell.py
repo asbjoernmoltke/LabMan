@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from labman_app.binding_store import BindingStore
+from labman_app.presets import DEFAULT_PRESETS_ROOT
 from labman_app.services import (
     RegistryShellServices,
     candidates_for,
@@ -68,6 +69,7 @@ class ShellWindow(QMainWindow):
         tasks: Iterable[Task],
         data_root: Path = DEFAULT_DATA_ROOT,
         binding_store: BindingStore | None = None,
+        presets_root: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -75,6 +77,7 @@ class ShellWindow(QMainWindow):
         self._tasks = list(tasks)
         self._data_root = Path(data_root)
         self._binding_store = binding_store
+        self._presets_root = presets_root
         self._active: _ActiveTask | None = None
         self._binding_combos: dict[str, QComboBox] = {}
         self._binding_error = QLabel()
@@ -167,7 +170,9 @@ class ShellWindow(QMainWindow):
             raise ValueError("; ".join(errors))
         await self.close_active_task()
 
-        services = RegistryShellServices(self._registry, bindings, self._data_root)
+        services = RegistryShellServices(
+            self._registry, bindings, self._data_root, self._presets_root
+        )
         widget = task.build_widget(services)
         self._active = _ActiveTask(task, services, widget)
         self._set_content(widget)
@@ -338,7 +343,11 @@ def main(argv: list[str] | None = None) -> int:
     asyncio.set_event_loop(loop)
 
     win = ShellWindow(
-        registry, discover_tasks(), data_root=args.data_root, binding_store=BindingStore()
+        registry,
+        discover_tasks(),
+        data_root=args.data_root,
+        binding_store=BindingStore(),
+        presets_root=DEFAULT_PRESETS_ROOT,
     )
     win.resize(1400, 800)
     win.show()

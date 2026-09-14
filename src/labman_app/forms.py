@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import enum
+import logging
 import types
 import typing
 from collections.abc import Callable
@@ -16,14 +17,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from labman_app.presets import PresetStore, params_from_dict
 from labman_app.widgets.base import SchemaWidget
 from labman_app.widgets.bool import BoolInput
 from labman_app.widgets.choice import ChoiceInput
 from labman_app.widgets.numeric import NumericInput
 from labman_app.widgets.optional import OptionalWrapper
+from labman_app.widgets.preset_bar import PresetBar
 from labman_app.widgets.text import TextInput
 from labman_core.lab_config import DeviceSync
-from labman_core.schema import Action, ParamMeta, Readable, Setable
+from labman_core.schema import Action, ParamMeta, Range, Readable, Setable
+
+logger = logging.getLogger("labman.forms")
 
 
 @dataclass
@@ -47,8 +52,43 @@ def build_params_form(
     """Build a form widget from a dataclass with `Annotated[T, ParamMeta]` fields.
 
     Returns `(container, getter)` where `getter()` reads current widget values
-    and constructs a validated instance of `cls`.
+    and constructs a validated instance of `cls`. It raises ValueError naming
+    the field for empty or out-of-bounds values.
     """
+    container, getter, _setter = _build_form(cls, initial)
+    return container, getter
+
+
+def build_params_form_with_presets(
+    cls: type, store: PresetStore, initial: Any | None = None
+) -> tuple[QWidget, Callable[[], Any]]:
+    """`build_params_form` with a preset bar above it (Presets in CLAUDE.md).
+
+    Unless `initial` is given, the form starts from the task's last-used values
+    if they still validate, otherwise from the dataclass defaults. Presets are
+    applied through the same validation as manual entry.
+    """
+    form, getter, setter = _build_form(cls, initial)
+    if initial is None:
+        last_used = store.load_last_used()
+        if last_used is not None:
+            try:
+                setter(last_used)
+            except ValueError as e:
+                logger.warning("ignoring last-used params for %r: %s", store.task_name, e)
+
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(PresetBar(store, getter, setter))
+    layout.addWidget(form)
+    return container, getter
+
+
+def _build_form(
+    cls: type, initial: Any | None
+) -> tuple[QWidget, Callable[[], Any], Callable[[dict[str, Any]], list[str]]]:
+    """Shared form builder returning `(container, getter, setter)`."""
     if not dataclasses.is_dataclass(cls):
         raise TypeError(f"{cls.__name__} is not a dataclass")
 
@@ -67,6 +107,7 @@ def build_params_form(
         grouped.setdefault(meta.group, []).append((f.name, inner, meta))
 
     field_widgets: dict[str, SchemaWidget] = {}
+    metas: dict[str, ParamMeta] = {}
 
     for group_name, entries in grouped.items():
         box = QGroupBox(group_name) if group_name else QGroupBox()
@@ -80,13 +121,52 @@ def build_params_form(
                 widget.setToolTip(meta.tooltip)
             form.addRow(_label_with_unit(meta.display or name, meta.unit), widget)
             field_widgets[name] = widget
+            metas[name] = meta
         outer.addWidget(box)
 
     def getter() -> Any:
-        kwargs = {name: w.value() for name, w in field_widgets.items()}
+        kwargs: dict[str, Any] = {}
+        for name, widget in field_widgets.items():
+            label = metas[name].display or name
+            try:
+                value = widget.value()
+            except ValueError as e:
+                raise ValueError(f"{label}: {e}") from e
+            _check_bounds(label, metas[name].bounds, value)
+            kwargs[name] = value
         return cls(**kwargs)
 
-    return container, getter
+    def setter(data: dict[str, Any]) -> list[str]:
+        """Apply field values (e.g. a preset) and validate them like manual entry.
+
+        Missing fields take dataclass defaults; unknown keys are returned, not
+        applied. On any invalid value the form is restored and ValueError raised.
+        """
+        values, unknown = params_from_dict(cls, data)
+        previous: dict[str, Any] = {}
+        for name, widget in field_widgets.items():
+            try:
+                previous[name] = widget.value()
+            except ValueError:
+                pass
+        try:
+            for name, value in values.items():
+                field_widgets[name].set_value(value)
+            getter()
+        except (ValueError, TypeError) as e:
+            for name, value in previous.items():
+                field_widgets[name].set_value(value)
+            raise ValueError(str(e)) from e
+        return unknown
+
+    return container, getter, setter
+
+
+def _check_bounds(label: str, bounds: Range | None, value: Any) -> None:
+    if bounds is None or isinstance(value, bool) or not isinstance(value, int | float):
+        return
+    if not bounds.contains(value):
+        raise ValueError(f"{label}: {value:g} outside [{bounds.low:g}, {bounds.high:g}]")
 
 
 def build_device_panel(device: Any) -> DevicePanel:

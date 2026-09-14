@@ -1,4 +1,5 @@
-from typing import Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Any, Protocol, runtime_checkable
 
 from labman_core.devices import Device
 from labman_core.lab_config import DeviceSync
@@ -19,6 +20,14 @@ class ShellServices(Protocol):
 
     def device_sync(self, binding_name: str) -> DeviceSync:
         """Connect-time sync the widget applies to this binding's panel."""
+        ...
+
+    def params_form(self, task_name: str, params_cls: type) -> tuple[Any, Callable[[], Any]]:
+        """`(QWidget, getter)` params form for the task, with the shell's presets wired in."""
+        ...
+
+    def run_succeeded(self, task_name: str, params: Any) -> None:
+        """Called by the task widget after a successful run (updates last-used params)."""
         ...
 
     def make_storage(

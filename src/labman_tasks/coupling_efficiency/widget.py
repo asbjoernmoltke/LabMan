@@ -19,7 +19,6 @@ from labman_app.forms import (
     DevicePanel,
     apply_sync_policy,
     build_device_panel,
-    build_params_form,
     poll_readables,
 )
 from labman_core.context import TaskContext
@@ -112,7 +111,7 @@ class CouplingEfficiencyWidget(QWidget):
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        form, get_params = build_params_form(self._task.params_cls)
+        form, get_params = self._shell.params_form(self._task.name, self._task.params_cls)
         self._get_params = get_params
         layout.addWidget(form)
 
@@ -170,6 +169,7 @@ class CouplingEfficiencyWidget(QWidget):
         ctx.live.subscribe("point", self._on_point)
         try:
             result = await self._task.run_headless(ctx, params)
+            self._shell.run_succeeded(self._task.name, params)
             show_result(self._plots, result)
             self._on_complete(result, storage.root)
         except AbortConditionMet as e:

@@ -15,12 +15,21 @@ class StubShell:
     def __init__(self, devices: dict[str, Device], data_root: Path) -> None:
         self._devices = devices
         self._data_root = data_root
+        self.succeeded: list[tuple[str, object]] = []
 
     def device(self, binding_name: str) -> Device:
         return self._devices[binding_name]
 
     def device_sync(self, binding_name: str) -> DeviceSync:
         return DeviceSync("hydrate")
+
+    def params_form(self, task_name: str, params_cls: type):
+        from labman_app.forms import build_params_form
+
+        return build_params_form(params_cls)
+
+    def run_succeeded(self, task_name: str, params) -> None:
+        self.succeeded.append((task_name, params))
 
     def make_storage(
         self, task_name: str, opts: StorageOptions | None = None
@@ -57,6 +66,7 @@ async def test_widget_run_populates_plots_and_persists(qapp, tmp_path: Path) -> 
 
     await widget._run(params)
 
+    assert widget._shell.succeeded == [("coupling_efficiency", params)]
     assert len(widget._sp_buf) == 4
     assert all(p == pytest.approx(0.6 * sp * 1e-3, rel=1e-6)
                for sp, p in zip(widget._sp_buf, widget._pout_buf, strict=True))
@@ -99,6 +109,7 @@ async def test_widget_cancellation_cleans_up_laser(qapp, tmp_path: Path) -> None
     state = await laser.get_state()
     assert state.enabled is False
     assert state.power_mw == 0.0
+    assert widget._shell.succeeded == []  # a stopped run is not "last used"
 
 
 @pytest.mark.asyncio

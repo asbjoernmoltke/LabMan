@@ -23,7 +23,7 @@ class RecordingTask(CouplingEfficiencyTask):
         await super().to_safe_state(devices)
 
 
-def _window(qapp, tmp_path: Path, task=None, devices=None, store=None):
+def _window(qapp, tmp_path: Path, task=None, devices=None, store=None, presets_root=None):
     from labman_app.shell import ShellWindow
 
     if devices is None:
@@ -33,7 +33,9 @@ def _window(qapp, tmp_path: Path, task=None, devices=None, store=None):
     reg = DeviceRegistry(config)
     reg.instantiate_all()
     task = task or CouplingEfficiencyTask()
-    win = ShellWindow(reg, [task], data_root=tmp_path, binding_store=store)
+    win = ShellWindow(
+        reg, [task], data_root=tmp_path, binding_store=store, presets_root=presets_root
+    )
     return win, reg, task
 
 
@@ -193,6 +195,43 @@ async def test_failed_open_does_not_save_bindings(qapp, tmp_path: Path) -> None:
     win, _reg, task = _window(qapp, tmp_path, devices=devices, store=store)
     await win.open_task(task, BINDINGS)
     assert store.load(task.name) == {}
+
+
+# ----- presets -----
+
+
+async def test_presets_wired_into_task_form_and_last_used_follows_runs(
+    qapp, tmp_path: Path
+) -> None:
+    from labman_app.presets import PresetStore
+    from labman_app.widgets.preset_bar import PresetBar
+    from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
+
+    presets_root = tmp_path / "presets"
+    win, _reg, task = _window(qapp, tmp_path, presets_root=presets_root)
+    await win.open_task(task, BINDINGS)
+    widget = win.active_widget
+    assert widget.findChild(PresetBar) is not None
+
+    params = CouplingEfficiencyParams(
+        power_start=1.0, power_stop=2.0, power_steps=3, averages_per_point=1, settle_time_s=0.0
+    )
+    await widget._run(params)
+    assert PresetStore(task.name, presets_root).load_last_used()["power_steps"] == 3
+
+    await win.close_active_task()
+    await win.open_task(task, BINDINGS)
+    assert win.active_widget._get_params() == params  # form reopens on last-used values
+    await win.shutdown()
+
+
+async def test_no_preset_bar_without_presets_root(qapp, tmp_path: Path) -> None:
+    from labman_app.widgets.preset_bar import PresetBar
+
+    win, _reg, task = _window(qapp, tmp_path)
+    await win.open_task(task, BINDINGS)
+    assert win.active_widget.findChild(PresetBar) is None
+    await win.shutdown()
 
 
 # ----- unavailable devices -----

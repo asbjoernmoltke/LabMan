@@ -22,6 +22,7 @@ from pathlib import Path
 import qasync
 from PySide6.QtWidgets import QApplication, QMainWindow
 
+from labman_app.forms import build_params_form
 from labman_core.devices import Device
 from labman_core.lab_config import DeviceSync
 from labman_core.simulators import SimLaser, SimPowerMeter
@@ -45,6 +46,12 @@ class DemoShell:
 
     def device_sync(self, binding_name: str) -> DeviceSync:
         return DeviceSync("hydrate")
+
+    def params_form(self, task_name: str, params_cls: type):
+        return build_params_form(params_cls)  # no presets in the demo
+
+    def run_succeeded(self, task_name: str, params) -> None:
+        return None
 
     def make_storage(
         self, task_name: str, opts: StorageOptions | None = None

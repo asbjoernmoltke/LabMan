@@ -138,6 +138,29 @@ def test_registry_shell_services_device_sync() -> None:
     assert services.device_sync("laser") == DeviceSync("hydrate")
 
 
+def test_run_succeeded_updates_last_used_preset(tmp_path: Path) -> None:
+    from labman_app.presets import PresetStore
+    from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
+
+    reg = _registry({"laser": LASER})
+    services = RegistryShellServices(
+        reg, {"laser": "laser"}, tmp_path / "data", presets_root=tmp_path / "presets"
+    )
+    services.run_succeeded("coupling_efficiency", CouplingEfficiencyParams(power_steps=8))
+
+    store = PresetStore("coupling_efficiency", tmp_path / "presets")
+    assert store.load_last_used()["power_steps"] == 8
+
+
+def test_run_succeeded_without_presets_root_writes_nothing(tmp_path: Path) -> None:
+    from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
+
+    reg = _registry({"laser": LASER})
+    services = RegistryShellServices(reg, {"laser": "laser"}, tmp_path)
+    services.run_succeeded("coupling_efficiency", CouplingEfficiencyParams())
+    assert list(tmp_path.iterdir()) == []
+
+
 async def test_example_lab_yaml_wires_simulators() -> None:
     reg = DeviceRegistry(LabConfig.from_path(EXAMPLE_LAB))
     assert reg.instantiate_all() == {}

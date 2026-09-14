@@ -6,7 +6,7 @@ deferred. Update this file whenever the answer to any of those changes.
 For *rules and conventions*, see [CLAUDE.md](CLAUDE.md). This document only
 tracks state.
 
-Last updated: 2026-09-14 (shell: sync policy, remembered bindings, resource locks, unavailable devices)
+Last updated: 2026-09-14 (presets)
 
 ---
 
@@ -36,7 +36,8 @@ Last updated: 2026-09-14 (shell: sync policy, remembered bindings, resource lock
 - [x] `widgets.SchemaWidget` base — `committed(value)` signal contract, `value()/set_value()` API
 - [x] `widgets.NumericInput` — slider+entry composite when bounds present
 - [x] `widgets.ChoiceInput`, `BoolInput`, `TextInput`, `OptionalWrapper`
-- [x] `forms.build_params_form(cls)` — `(QWidget, getter)` from `Annotated[T, ParamMeta]` dataclasses
+- [x] `forms.build_params_form(cls)` — `(QWidget, getter)` from `Annotated[T, ParamMeta]` dataclasses; getter enforces bounds and names the field on errors
+- [x] `forms.build_params_form_with_presets(cls, store)` — preset bar above the form; starts from `__last_used__` when it still validates. Shared internal setter applies values with type + bounds validation and restores the form on failure.
 - [x] `forms.build_device_panel(device)` — returns `DevicePanel(widget, setable_widgets, readable_labels, readables)`; three sections (Settings/Readouts/Actions); async commits via running loop
 - [x] `forms.sync_panel_from_device(panel, device)` — one-shot hydrate of setables from device state
 - [x] `forms.poll_readables(panel, interval_s)` — background task updates readable labels at configured rate (5 Hz default)
@@ -46,7 +47,10 @@ Last updated: 2026-09-14 (shell: sync policy, remembered bindings, resource lock
   - A failed `initialize()` (e.g. default push rejected) runs safe state and returns to the binding page with the error
 - [x] `forms.apply_sync_policy(panel, device, sync)` — `hydrate` / `push_defaults` (write in order, then hydrate; raises on unknown setable or rejected value) / `skip`
 - [x] `binding_store.BindingStore` — last-used bindings per task in `app/state/bindings.json`; tolerant of missing/corrupt file
+- [x] `presets.PresetStore` (Qt-free) — `app/presets/<task_name>.json`; named save/load/delete, `__last_used__`, reserved `__` names, unreadable file moved to `.corrupt` before writing; `params_to_dict` / `params_from_dict` (Enum, Literal, Path, bool/int/float strictness, defaults for missing fields, unknown keys reported)
+- [x] `widgets.PresetBar` — preset dropdown incl. "(last used)", Load / Save as… / Delete with overwrite + delete confirmation, inline error messages
 - [x] `ShellServices.device_sync(binding)` — task widgets ask the shell which sync to apply
+- [x] `ShellServices.params_form(task_name, params_cls)` / `run_succeeded(task_name, params)` — presets wired by the shell; `RegistryShellServices(presets_root=None)` disables presets (tests, demo)
 - [x] `shell.main()` / `python -m labman_app --lab <lab.yaml> [--data-root]` — fatal dialog only if `lab.yaml` can't be loaded; unavailable devices → warning, app starts without them
 
 ### `labman_tasks.coupling_efficiency`
@@ -57,24 +61,26 @@ Last updated: 2026-09-14 (shell: sync policy, remembered bindings, resource lock
 - [x] `analysis.analyze()` (pure function, NaN-safe)
 - [x] `task.CouplingEfficiencyTask` — glue + HDF5/JSON/meta persistence; `to_safe_state` delegates to `safety.py`; `run_headless` finally calls it as defense-in-depth
 - [x] `plots.py` — pyqtgraph two-plot stack
-- [x] `widget.CouplingEfficiencyWidget` — three-column layout, Start/Stop/progress, async run lifecycle, live plot updates, hydrate + poll on `initialize()`, **friendly status for `AbortConditionMet`**, live buffers initialised in `__init__` (not just on Start)
+- [x] `widget.CouplingEfficiencyWidget` — three-column layout, Start/Stop/progress, async run lifecycle, live plot updates, hydrate + poll on `initialize()`, **friendly status for `AbortConditionMet`**, live buffers initialised in `__init__` (not just on Start), params form from the shell (presets), reports successful runs
 - [x] Entry-point registered in `pyproject.toml`
 
-### Tests (131 passing)
+### Tests (176 passing)
 - [x] Storage: 4 tests
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
 - [x] SimPowerMeter: 8 tests (incl. negative reads after calibrate, negative noise samples not clipped, display_precision present)
 - [x] Widgets: 12 tests
-- [x] Forms: 17 tests (incl. hydrate sync, readable polling, sub-precision suppression, sync policies)
+- [x] Forms: 23 tests (incl. hydrate sync, readable polling, sub-precision suppression, sync policies, setter validation + rollback, field-named errors, last-used seeding)
+- [x] Presets: 25 tests (params ↔ dict round trip and type coercion/rejection, store save/load/delete, last-used separation, reserved names, corrupt file set aside)
+- [x] Preset bar: 10 tests (round trip, name dialog, overwrite/delete confirmation, reserved name, invalid form, invalid preset leaves form unchanged, unknown fields reported, last-used entry)
 - [x] Coupling-efficiency widget: 5 tests
 - [x] Coupling-efficiency safety: 8 tests (idempotency, missing laser, abort raises + cleans up, abort doesn't trigger when efficiency above threshold, safety on normal completion, safety on unhandled workflow error)
 - [x] Lab config: 12 tests (round trip, full config, bad version/role/sync_policy, missing driver, defaults/push_defaults rules, resource validation + duplicates)
 - [x] Device registry: 19 tests (instantiation w/ and w/o `name` kwarg, idempotency, role/policy lookup, per-device failures incl. dependencies and no retry, shutdown continues past failures, device references, resource locks incl. second registry locked out until shutdown, connect-sync once per session)
 - [x] Resource lock: 5 tests (idempotent acquire/release, busy, re-acquire, independence, cross-process + released when holder exits)
 - [x] Binding store: 5 tests (round trip, missing/corrupt file, per-task independence, junk entries ignored)
-- [x] Shell services: 17 tests (discovery, default bindings incl. no sharing and remembered/stale bindings, validation errors incl. unavailable, services resolution + device_sync, `examples/lab.sim.yaml` stays valid)
-- [x] Shell window: 11 tests (binding defaults, open + hydrate, invalid bindings rejected, close runs safe state, window close deferred, push_defaults first open only, skip leaves widgets blank, failed push returns to binding page, bindings remembered across windows / not saved on failure, unavailable devices listed)
+- [x] Shell services: 19 tests (discovery, default bindings incl. no sharing and remembered/stale bindings, validation errors incl. unavailable, services resolution + device_sync, run_succeeded → last used, `examples/lab.sim.yaml` stays valid)
+- [x] Shell window: 13 tests (presets wired + last used follows runs and seeds reopened form, no preset bar without presets root, binding defaults, open + hydrate, invalid bindings rejected, close runs safe state, window close deferred, push_defaults first open only, skip leaves widgets blank, failed push returns to binding page, bindings remembered across windows / not saved on failure, unavailable devices listed)
 
 ### Tooling / Examples
 - [x] `pyproject.toml` (hatchling, numpy, h5py, pytest-asyncio, ruff, `[app]` extra: PySide6 / qasync / pyqtgraph)
@@ -87,10 +93,11 @@ Last updated: 2026-09-14 (shell: sync policy, remembered bindings, resource lock
 
 ## Next up (logical next slice)
 
-Presets (moved up from Planned now that the shell is complete):
+Second task, `beam_profile` — the first real test of "each new measurement is small to add":
 
-- [ ] `PresetStore` (per-task JSON; `__last_used__` auto-update; named save/load/delete)
-- [ ] Preset bar widget above params form
+- [ ] `Camera` + `Stage` Protocols and `SimCamera` / `SimStage` (see Planned → Core)
+- [ ] `beam_profile` task folder per the standard layout, incl. `safety.py`
+- [ ] Lift the generic HDF5 persistence helper out of `coupling_efficiency/task.py` (see Planned → Cross-cutting)
 
 ---
 

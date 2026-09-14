@@ -213,12 +213,15 @@ efficiency task does not care.
 
 ```python
 build_params_form(cls, initial=None) -> (QWidget, Callable[[], Params])
+build_params_form_with_presets(cls, store, initial=None)
+                                     -> (QWidget, Callable[[], Params])
 build_device_panel(device)           -> QWidget
 ```
 
 - Return widgets; do not mutate a shared view.
 - The second return value of `build_params_form` reads current form state as a
-  validated dataclass instance.
+  validated dataclass instance (type + bounds; raises `ValueError` naming the
+  field).
 - Composite widgets (slider+entry, numeric-with-unit, enum-as-radio) live in
   `labman-app/widgets/` and are chosen by the renderer. The schema never names a
   widget composition.
@@ -266,10 +269,19 @@ to last-known-good and surface error. No "Apply" button, no dirty-state tracking
 
 - Task-scope only for now. Instrument-wide profiles are deferred.
 - Stored as one JSON per task at `app/presets/<task_name>.json`.
-- Reserved key `__last_used__` is auto-updated on every successful run.
-- User-named presets saved/loaded through the same validation path as manual entry.
-- `PresetStore` lives in `labman-app` and is wired by the shell into the
-  params-form widget; tasks do not touch it directly.
+- Reserved key `__last_used__` is auto-updated on every successful run
+  (`run_headless` returned — not Stop, `AbortConditionMet`, or an error) and
+  seeds the form when the task is opened. Names starting with `__` are reserved.
+- User-named presets are saved/loaded through the same validation path as
+  manual entry: values go through the form's setter and getter (type and
+  bounds checks), and an invalid preset leaves the form unchanged. Missing
+  fields take dataclass defaults; unknown fields are ignored and reported.
+- `PresetStore` lives in `labman-app` and is wired by the shell: task widgets
+  get their params form from `ShellServices.params_form(task_name, params_cls)`
+  and report success via `ShellServices.run_succeeded(task_name, params)`.
+  Tasks never construct or read a `PresetStore`.
+- An unreadable presets file is moved aside to `<task_name>.json.corrupt`
+  before the next write, never silently overwritten.
 
 ## Async
 

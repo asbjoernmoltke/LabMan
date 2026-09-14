@@ -69,6 +69,92 @@ def test_build_params_form_real_coupling_efficiency_params(qapp) -> None:
     assert out == CouplingEfficiencyParams()
 
 
+def _ce_form():
+    from labman_app.forms import _build_form
+    from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
+
+    return _build_form(CouplingEfficiencyParams, None)
+
+
+def test_params_form_setter_applies_values_and_defaults(qapp) -> None:
+    _widget, getter, setter = _ce_form()
+    setter({"wavelength_nm": 1310.0})
+
+    unknown = setter({"power_steps": 12, "abort_below": 0.3, "old_field": 1})
+
+    p = getter()
+    assert p.power_steps == 12
+    assert p.abort_below == pytest.approx(0.3)
+    assert p.wavelength_nm == 1550.0  # absent from data -> dataclass default
+    assert unknown == ["old_field"]
+
+
+def test_params_form_setter_out_of_bounds_restores_form(qapp) -> None:
+    _widget, getter, setter = _ce_form()
+    setter({"power_steps": 12})
+
+    with pytest.raises(ValueError, match=r"# points: 5000 outside \[2, 1000\]"):
+        setter({"power_steps": 5000, "wavelength_nm": 1310.0})
+
+    p = getter()
+    assert p.power_steps == 12
+    assert p.wavelength_nm == 1550.0
+
+
+def test_params_form_setter_wrong_type_leaves_form_valid(qapp) -> None:
+    from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
+
+    _widget, getter, setter = _ce_form()
+    with pytest.raises(ValueError, match="expected a number"):
+        setter({"power_start": "lots"})
+    assert getter() == CouplingEfficiencyParams()
+
+
+def test_params_form_getter_names_field_for_empty_value(qapp) -> None:
+    from labman_app.forms import build_params_form
+
+    @dataclass
+    class P:
+        x: Annotated[float, ParamMeta(display="Exposure")] = 1.0
+
+    widget, getter = build_params_form(P)
+    from labman_app.widgets.numeric import NumericInput
+
+    widget.findChild(NumericInput)._line.setText("")
+    with pytest.raises(ValueError, match="Exposure: empty numeric value"):
+        getter()
+
+
+def test_form_with_presets_starts_from_last_used(qapp, tmp_path) -> None:
+    from labman_app.forms import build_params_form_with_presets
+    from labman_app.presets import PresetStore
+    from labman_app.widgets.preset_bar import PresetBar
+    from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
+
+    store = PresetStore("coupling_efficiency", tmp_path)
+    store.save_last_used(CouplingEfficiencyParams(power_steps=42))
+
+    widget, getter = build_params_form_with_presets(CouplingEfficiencyParams, store)
+
+    assert getter().power_steps == 42
+    assert widget.findChild(PresetBar) is not None
+
+
+def test_form_with_presets_ignores_invalid_last_used(qapp, tmp_path) -> None:
+    import json
+
+    from labman_app.forms import build_params_form_with_presets
+    from labman_app.presets import LAST_USED, PresetStore
+    from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
+
+    store = PresetStore("coupling_efficiency", tmp_path)
+    store.path.write_text(json.dumps({LAST_USED: {"power_steps": 99999}}), encoding="utf-8")
+
+    _widget, getter = build_params_form_with_presets(CouplingEfficiencyParams, store)
+
+    assert getter() == CouplingEfficiencyParams()
+
+
 def test_build_device_panel_for_sim_laser_has_three_groups(qapp) -> None:
     from PySide6.QtWidgets import QGroupBox
 

@@ -9,7 +9,9 @@ import h5py
 import numpy as np
 
 from labman_core.context import TaskContext
+from labman_core.devices import Device
 from labman_core.roles import DeviceRole
+from labman_tasks.coupling_efficiency import safety
 from labman_tasks.coupling_efficiency.analysis import analyze
 from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
 from labman_tasks.coupling_efficiency.result import (
@@ -37,14 +39,24 @@ class CouplingEfficiencyTask:
     async def run_headless(
         self, ctx: TaskContext, params: CouplingEfficiencyParams
     ) -> CouplingEfficiencyResult:
-        raw = await acquire(ctx, params)
-        _save_raw(ctx.storage.raw_path(), raw)
-        _save_params(ctx.storage.params_path(), params)
-        _save_meta(ctx.storage.meta_path(), task_name=self.name, devices=ctx.devices)
+        try:
+            raw = await acquire(ctx, params)
+            _save_raw(ctx.storage.raw_path(), raw)
+            _save_params(ctx.storage.params_path(), params)
+            _save_meta(ctx.storage.meta_path(), task_name=self.name, devices=ctx.devices)
 
-        result = analyze(raw, params)
-        _save_result(ctx.storage.result_path(), result)
-        return result
+            result = analyze(raw, params)
+            _save_result(ctx.storage.result_path(), result)
+            return result
+        finally:
+            # Defense-in-depth: acquire's finally already calls safety, but we
+            # repeat it here so a failure during persistence (between acquire
+            # returning and analyze finishing) still leaves hardware safe.
+            # Idempotent by design.
+            await self.to_safe_state(ctx.devices)
+
+    async def to_safe_state(self, devices: dict[str, Device]) -> None:
+        await safety.to_safe_state(devices)
 
 
 def _save_raw(path: Path, raw: CouplingEfficiencyRawData) -> None:

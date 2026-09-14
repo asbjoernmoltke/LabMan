@@ -23,6 +23,7 @@ from labman_app.forms import (
     sync_panel_from_device,
 )
 from labman_core.context import TaskContext
+from labman_core.exceptions import AbortConditionMet
 from labman_core.shell import ShellServices
 from labman_tasks.coupling_efficiency.plots import (
     clear_plots,
@@ -58,6 +59,7 @@ class CouplingEfficiencyWidget(QWidget):
         self._device_panels: dict[str, DevicePanel] = {}
         self._poll_tasks: list[asyncio.Task] = []
         self._run_task: asyncio.Task | None = None
+        self._reset_live_buffers()
 
         # Build columns
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -170,6 +172,8 @@ class CouplingEfficiencyWidget(QWidget):
             result = await self._task.run_headless(ctx, params)
             show_result(self._plots, result)
             self._on_complete(result, storage.root)
+        except AbortConditionMet as e:
+            self._status_label.setText(f"Aborted: {e}   |   Partial data: {storage.root}")
         except asyncio.CancelledError:
             self._status_label.setText(f"Stopped. Partial data: {storage.root}")
             raise

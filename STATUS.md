@@ -6,7 +6,7 @@ deferred. Update this file whenever the answer to any of those changes.
 For *rules and conventions*, see [CLAUDE.md](CLAUDE.md). This document only
 tracks state.
 
-Last updated: 2026-04-23
+Last updated: 2026-09-14 (lab config + device registry)
 
 ---
 
@@ -17,11 +17,15 @@ Last updated: 2026-04-23
 - [x] `schema`: `Range`, `ParamMeta`, `Setable`, `Readable`, `Action`, `DeviceControls`
 - [x] `devices`: `Device`, `LaserSource`, `PowerMeter` Protocols + `LaserState`
 - [x] `storage`: `StorageOptions`, `RunStorage`, `DEFAULT_DATA_ROOT = Path("app/data")`
-- [x] `context`: `TaskContext`, `ProgressReporter`, `LivePublisher` (pub/sub for intermediate task events; tasks publish typed event names + payloads)
-- [x] `task.Task` Protocol
-- [x] `shell.ShellServices` Protocol (`device(name)`, `make_storage(task_name, opts)`)
+- [x] `context`: `TaskContext`, `ProgressReporter`, `LivePublisher`
+- [x] `exceptions.AbortConditionMet` — typed signal for user-defined guards
+- [x] `task.Task` Protocol — now includes `to_safe_state(devices)` per the Safety contract
+- [x] `shell.ShellServices` Protocol
+- [x] `lab_config.LabConfig` / `DeviceConfig` — `lab.yaml` v1 loader (driver dotted path, role, args, sync_policy), validated with clear errors
+- [x] `registry.DeviceRegistry` — imports + instantiates drivers from `LabConfig` (passes config `name` only if the constructor accepts it), lookup by name/role/sync policy, best-effort `shutdown_all`
+- [x] `schema.Readable.display_precision` — values below this render as "0" in panels
 - [x] `simulators.SimLaser`, `simulators.SimPowerMeter`
-  - SimPowerMeter: float bounded (`wavelength`), choices (`range`, `acq_mode`), int bounded (`averaging`), action with side effect (`calibrate` updates `offset` readable).
+  - SimPowerMeter: choices/int/calibrate action, **negative reads allowed** (no clipping); power/offset readables carry `display_precision=1e-9`
 
 ### `labman_app`
 - [x] **Committed to PySide6** (6.11).
@@ -36,21 +40,25 @@ Last updated: 2026-04-23
 ### `labman_tasks.coupling_efficiency`
 - [x] `params.CouplingEfficiencyParams` (`Annotated[T, ParamMeta]` schema)
 - [x] `result.CouplingEfficiencyRawData`, `CouplingEfficiencyResult`
-- [x] `workflow.acquire()` (async, hardware IO only, try/finally cleanup, publishes `point` events to `ctx.live`)
+- [x] `safety.py` — load-bearing safe-state for the task (laser power=0, disabled). Idempotent, non-raising.
+- [x] `workflow.acquire()` (async, hardware IO only, finally → `safety.to_safe_state`, publishes `point` events, **honors `abort_below`** by raising `AbortConditionMet`)
 - [x] `analysis.analyze()` (pure function, NaN-safe)
-- [x] `task.CouplingEfficiencyTask` (glue + HDF5/JSON/meta persistence)
-- [x] `plots.py` — pyqtgraph two-plot stack (powers + efficiency), `make_plots`, `update_live`, `show_result`, `clear_plots`
-- [x] `widget.CouplingEfficiencyWidget` — three-column layout (Equipment | Experiment | Graphics), Start/Stop/progress, async run lifecycle, live plot updates from `point` events, hydrate + poll on `initialize()`, `shutdown()` cancels poll + run tasks
+- [x] `task.CouplingEfficiencyTask` — glue + HDF5/JSON/meta persistence; `to_safe_state` delegates to `safety.py`; `run_headless` finally calls it as defense-in-depth
+- [x] `plots.py` — pyqtgraph two-plot stack
+- [x] `widget.CouplingEfficiencyWidget` — three-column layout, Start/Stop/progress, async run lifecycle, live plot updates, hydrate + poll on `initialize()`, **friendly status for `AbortConditionMet`**, live buffers initialised in `__init__` (not just on Start)
 - [x] Entry-point registered in `pyproject.toml`
 
-### Tests (46 passing)
+### Tests (73 passing)
 - [x] Storage: 4 tests
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
-- [x] SimPowerMeter: 5 tests
+- [x] SimPowerMeter: 8 tests (incl. negative reads after calibrate, negative noise samples not clipped, display_precision present)
 - [x] Widgets: 12 tests
-- [x] Forms: 12 tests (incl. hydrate sync, readable polling)
-- [x] Coupling-efficiency widget: 5 tests (E2E run + persistence, progress→bar, cancellation cleanup, hydrate-on-init, LivePublisher dispatch)
+- [x] Forms: 13 tests (incl. hydrate sync, readable polling, sub-precision suppression)
+- [x] Coupling-efficiency widget: 5 tests
+- [x] Coupling-efficiency safety: 8 tests (idempotency, missing laser, abort raises + cleans up, abort doesn't trigger when efficiency above threshold, safety on normal completion, safety on unhandled workflow error)
+- [x] Lab config: 6 tests (round trip, full config, bad version/role/sync_policy, missing driver)
+- [x] Device registry: 9 tests (instantiation w/ and w/o `name` kwarg, idempotency, role/policy lookup, bad args surface, bad driver paths, shutdown continues past failures)
 
 ### Tooling / Examples
 - [x] `pyproject.toml` (hatchling, numpy, h5py, pytest-asyncio, ruff, `[app]` extra: PySide6 / qasync / pyqtgraph)
@@ -66,8 +74,7 @@ The Qt shell — host application that discovers tasks, binds devices to roles, 
 
 - [ ] `labman_app/shell.py` — main window with task picker (sidebar/tab) and active task widget area
 - [ ] Task discovery via Python entry points (`importlib.metadata.entry_points(group="labman.tasks")`)
-- [ ] `lab.yaml` config loader — declares connected devices (driver class, address, sync policy)
-- [ ] Device registry that loads drivers from `lab.yaml`, instantiates and connects them at startup
+- [ ] Example `lab.yaml` wired to simulators (loader and registry are done — see Done)
 - [ ] Real `ShellServices` implementation backed by the device registry
 - [ ] Device-binding UI — for each task's `required_bindings`, dropdown to pick from available devices of the matching role; remembered per task
 - [ ] Connect-time sync policy implementation (`hydrate` | `push_defaults` | `skip`)
@@ -112,7 +119,8 @@ The Qt shell — host application that discovers tasks, binds devices to roles, 
 ## Open questions
 
 - **Cross-task dataset linking** (e.g. "this beam-profile run used the laser settings from coupling-efficiency run X") — likely a `parent_run` field in `meta.json`; not yet designed.
-- **Action-induced readable refresh** — currently readables only update on the polling tick. If an action like `calibrate` updates `offset`, you wait up to 200 ms to see it. Acceptable, or do we want immediate refresh after action completion? Decide if it becomes annoying.
+- **Action-induced readable refresh** — currently readables only update on the polling tick. If an action like `calibrate` updates `offset`, you wait up to 200 ms to see it. Acceptable, or do we want immediate refresh after action completion?
+- **App-close safety** — `Task.to_safe_state` is called on workflow exit and on widget Stop; needs wiring on Qt `closeEvent` (shell territory). For SIGKILL/power-loss, hardware fail-safes are out of scope.
 
 ---
 

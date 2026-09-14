@@ -12,6 +12,7 @@ authors = [{ name = "Asbjorn Moltke", email = "asbmm@dtu.dk" }]
 dependencies = [
     "numpy>=2.0",
     "h5py>=3.11",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

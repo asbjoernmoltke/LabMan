@@ -1,5 +1,6 @@
 from labman_core.context import LivePublisher, ProgressReporter, TaskContext
 from labman_core.devices import LaserSource, LaserState, PowerMeter
+from labman_core.exceptions import AbortConditionMet
 from labman_core.roles import DeviceRole
 from labman_core.schema import (
     Action,
@@ -15,6 +16,7 @@ from labman_core.task import Task
 
 __all__ = [
     "DEFAULT_DATA_ROOT",
+    "AbortConditionMet",
     "Action",
     "DeviceControls",
     "DeviceRole",

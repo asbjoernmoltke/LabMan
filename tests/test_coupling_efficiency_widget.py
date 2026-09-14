@@ -40,7 +40,6 @@ def _build_widget(qapp, tmp_path: Path, eff: float = 0.6):
     )
     task = CouplingEfficiencyTask()
     widget = CouplingEfficiencyWidget(task, shell)
-    widget._reset_live_buffers()
     return widget, laser
 
 

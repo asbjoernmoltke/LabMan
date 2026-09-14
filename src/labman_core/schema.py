@@ -50,6 +50,14 @@ class Readable:
     unit: str
     kind: type
     get: Callable[[], Awaitable[Any]]
+    display_precision: float | None = None
+    """If set, |value| < display_precision is rendered as "0" in panels.
+
+    Use this to suppress sub-resolution noise (e.g. a power meter with 1 nW
+    resolution should set this to 1e-9 so dark noise reads as "0" rather than
+    flicker between 0 and small positive/negative values). Does NOT affect
+    storage or analysis — only display.
+    """
 
 
 @dataclass

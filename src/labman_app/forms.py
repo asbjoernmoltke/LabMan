@@ -228,6 +228,8 @@ def _label_with_unit(display: str, unit: str) -> str:
 
 def _format_readable_value(value: Any, readable: Readable) -> str:
     if isinstance(value, float):
+        if readable.display_precision is not None and abs(value) < readable.display_precision:
+            return "0"
         return f"{value:.4g}"
     return str(value)
 

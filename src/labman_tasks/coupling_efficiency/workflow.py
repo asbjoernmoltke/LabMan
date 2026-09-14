@@ -5,6 +5,8 @@ import numpy as np
 
 from labman_core.context import TaskContext
 from labman_core.devices import LaserSource, PowerMeter
+from labman_core.exceptions import AbortConditionMet
+from labman_tasks.coupling_efficiency import safety
 from labman_tasks.coupling_efficiency.params import CouplingEfficiencyParams
 from labman_tasks.coupling_efficiency.result import CouplingEfficiencyRawData
 
@@ -46,9 +48,9 @@ async def acquire(
                     "p_out_w": float(p_out[i].mean()),
                 },
             )
+            _check_abort(params, p_in[i], p_out[i])
     finally:
-        await laser.set_power_mw(0.0)
-        await laser.set_enabled(False)
+        await safety.to_safe_state(ctx.devices)
 
     return CouplingEfficiencyRawData(
         setpoints_mw=setpoints,
@@ -56,3 +58,21 @@ async def acquire(
         p_out_w=p_out,
         t_seconds=t,
     )
+
+
+def _check_abort(
+    params: CouplingEfficiencyParams,
+    p_in_point: np.ndarray,
+    p_out_point: np.ndarray,
+) -> None:
+    if params.abort_below is None:
+        return
+    p_in_mean = float(p_in_point.mean())
+    p_out_mean = float(p_out_point.mean())
+    if p_in_mean <= 0:
+        return
+    eff = p_out_mean / p_in_mean
+    if eff < params.abort_below:
+        raise AbortConditionMet(
+            f"η = {eff:.4f} below threshold {params.abort_below}"
+        )

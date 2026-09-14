@@ -17,6 +17,29 @@ async def test_calibrate_subtracts_baseline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_negative_reads_after_calibrate_against_higher_signal() -> None:
+    """Calibrating against a higher reference and then reading a smaller signal
+    yields a negative value — that's expected and must flow through unclipped.
+    """
+    src = [10.0]  # mutable so we can change after calibrate
+    pm = SimPowerMeter(source_mw=lambda: src[0], coupling=1.0, noise_w=0.0)
+
+    await pm.calibrate()  # offset captured at 10 mW
+    src[0] = 5.0
+
+    after = await pm.read_power_w()
+    assert after == pytest.approx(-5e-3)
+
+
+@pytest.mark.asyncio
+async def test_negative_noise_samples_are_not_clipped() -> None:
+    """With laser at 0 and finite noise, some reads should be < 0."""
+    pm = SimPowerMeter(source_mw=lambda: 0.0, noise_w=1e-7, seed=1)
+    samples = [await pm.read_power_w() for _ in range(200)]
+    assert any(s < 0 for s in samples), "expected at least one negative noise sample"
+
+
+@pytest.mark.asyncio
 async def test_calibrate_offset_visible_in_readable() -> None:
     pm = SimPowerMeter(source_mw=lambda: 10.0, coupling=1.0, noise_w=0.0)
     await pm.calibrate()
@@ -66,3 +89,13 @@ async def test_controls_exposes_expected_surface() -> None:
     avg_setable = next(s for s in c.setables if s.name == "averaging")
     assert avg_setable.kind is int
     assert avg_setable.bounds is not None and avg_setable.bounds.low == 1
+
+
+@pytest.mark.asyncio
+async def test_power_readable_has_display_precision() -> None:
+    pm = SimPowerMeter()
+    c = pm.controls()
+    power = next(r for r in c.readables if r.name == "power")
+    offset = next(r for r in c.readables if r.name == "offset")
+    assert power.display_precision == 1e-9
+    assert offset.display_precision == 1e-9

@@ -42,6 +42,7 @@ labman_tasks/<task_name>/
 ├── result.py         # RawData and Result dataclasses
 ├── workflow.py       # async acquire(ctx, params) -> RawData; hardware IO only
 ├── analysis.py       # analyze(raw, params) -> Result; pure function
+├── safety.py         # to_safe_state(devices) — load-bearing, see Safety contract
 ├── widget.py         # Qt widget; imports allowed here and nowhere else in task
 ├── plots.py          # Plot functions usable from widget AND notebooks
 ├── resources/        # Optional static assets (calibration files, references)
@@ -66,6 +67,55 @@ labman_tasks/<task_name>/
    `ParamMeta`/`Setable`. No `pint` yet — plain floats.
 7. **Plots take a `Result` (or `RawData`) and return a figure/widget.** Do not
    call devices from plot code.
+
+## Safety contract (load-bearing)
+
+Lab hardware can hurt people, samples, or itself if left in the wrong state.
+Every task MUST define and uphold a "safe state" for its hardware. Treat
+changes to `safety.py` and `to_safe_state` paths with extra care.
+
+### Rules
+
+1. **Every task has a `safety.py`** with an `async def to_safe_state(devices)`
+   function. It defines what "safe" means for that task's hardware combination
+   (e.g. coupling efficiency: laser power = 0, laser disabled).
+2. **Every task implements `Task.to_safe_state(devices)`** as a thin delegate
+   to its `safety.py` function.
+3. **`to_safe_state` MUST be idempotent.** Callable any number of times in any
+   order, in any device state.
+4. **`to_safe_state` MUST NOT raise.** Wrap each device call in try/except and
+   log on failure. Callers are usually in an exception path and cannot recover
+   from nested failures.
+5. **Workflows call `safety.to_safe_state` in `finally`** of `acquire()` —
+   never inline cleanup commands. This guarantees the safe path runs whether
+   the workflow returned, raised, was cancelled, or hit `AbortConditionMet`.
+6. **`Task.run_headless` calls `self.to_safe_state` in `finally`** as
+   defense-in-depth, in case persistence between `acquire` and `analyze` raises.
+7. **Widgets call `to_safe_state` on Stop, on close, on unhandled error.** The
+   widget owns the lifecycle of the run task; the safety hook owns hardware.
+8. **`AbortConditionMet`** (in `labman_core.exceptions`) is the signal for
+   user-defined guards triggering mid-acquire (e.g. efficiency below threshold).
+   Distinct from `CancelledError` (user pressed Stop) and generic exceptions.
+   All three exit through the same `to_safe_state` path.
+
+### Hardware-state guarantees
+
+| Event                                         | Hardware state on exit                                   |
+|-----------------------------------------------|----------------------------------------------------------|
+| Workflow completes successfully               | Task's safe state (`to_safe_state` ran).                 |
+| User clicks Stop                              | Task's safe state.                                       |
+| `AbortConditionMet` raised (user-defined guard) | Task's safe state.                                     |
+| Unhandled exception in workflow               | Task's safe state.                                       |
+| Persistence error after acquire returns       | Task's safe state (defense-in-depth in `run_headless`).  |
+| App close / window close (shell territory)    | Task's safe state, then device disconnect (TBD with shell). |
+| Process killed (SIGKILL, power loss)          | NOT GUARANTEED — relies on hardware's own fail-safe.     |
+
+### What "safe" means is task-specific
+
+Tasks share devices but not safety semantics. A coupling-efficiency task and a
+beam-profile task may both use the same laser, but only one of them might need
+to also park a stage. The task's `safety.py` is the single source of truth for
+its own combination.
 
 ## Storage
 

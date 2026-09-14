@@ -171,3 +171,24 @@ async def test_poll_readables_updates_label(qapp) -> None:
             await poll_task
         except asyncio.CancelledError:
             pass
+
+
+@pytest.mark.asyncio
+async def test_poll_readables_suppresses_subprecision_values(qapp) -> None:
+    """Readings below the readable's display_precision render as '0'."""
+    from labman_app.forms import build_device_panel, poll_readables
+
+    # PM with noise well below display_precision (1e-9). Laser is off.
+    pm = SimPowerMeter(source_mw=lambda: 0.0, noise_w=1e-12, seed=42)
+    panel = build_device_panel(pm)
+
+    poll_task = asyncio.create_task(poll_readables(panel, interval_s=0.01))
+    try:
+        await asyncio.sleep(0.05)
+        assert panel.readable_labels["power"].text() == "0"
+    finally:
+        poll_task.cancel()
+        try:
+            await poll_task
+        except asyncio.CancelledError:
+            pass

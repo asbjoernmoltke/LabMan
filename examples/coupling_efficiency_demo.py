@@ -58,13 +58,13 @@ def main() -> None:
         name="pm_in",
         source_mw=lambda: laser.power_mw,
         coupling=1.0,
-        noise_w=1e-7,
+        noise_w=1e-10,  # well below display_precision (1e-9); reads as "0" when laser off
     )
     pm_out = SimPowerMeter(
         name="pm_out",
         source_mw=lambda: laser.power_mw,
         coupling=0.6,
-        noise_w=1e-7,
+        noise_w=1e-10,
     )
     shell = DemoShell({
         "laser": laser,

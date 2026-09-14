@@ -18,6 +18,10 @@ class SimPowerMeter:
     minus any calibrated offset. Pass a `source_mw` callable that returns the
     laser power in mW; tests bind the same SimLaser to two SimPowerMeters with
     different `coupling` values to mimic input/output ports.
+
+    Reads can be negative — calibrating against a higher reference and then
+    reading a smaller signal is a legitimate workflow. Callers are responsible
+    for guarding division by p_in (analyzer's job, not the meter's).
     """
 
     RANGES: tuple[str, ...] = ("auto", "1mW", "30mW", "300mW")
@@ -51,7 +55,7 @@ class SimPowerMeter:
         return self._name
 
     async def read_power_w(self) -> float:
-        return max(0.0, self._raw_sample_w() - self._offset_w)
+        return self._raw_sample_w() - self._offset_w
 
     async def set_wavelength_nm(self, wavelength_nm: float) -> None:
         self._wavelength_nm = float(wavelength_nm)
@@ -66,9 +70,13 @@ class SimPowerMeter:
         self._averaging = self._validate_int(value, 1, 10000, "averaging")
 
     async def calibrate(self) -> None:
-        """Sample `averaging` times at current source power and store the mean as offset."""
+        """Sample `averaging` times at current source power and store the mean as offset.
+
+        Offset can be negative (rare) — happens only if calibrating against
+        below-baseline noise. Subsequent reads simply add the magnitude back.
+        """
         samples = [self._raw_sample_w() for _ in range(self._averaging)]
-        self._offset_w = max(0.0, float(np.mean(samples)))
+        self._offset_w = float(np.mean(samples))
 
     async def shutdown(self) -> None:
         return None
@@ -124,6 +132,7 @@ class SimPowerMeter:
                     unit="W",
                     kind=float,
                     get=self.read_power_w,
+                    display_precision=1e-9,
                 ),
                 Readable(
                     name="offset",
@@ -131,6 +140,7 @@ class SimPowerMeter:
                     unit="W",
                     kind=float,
                     get=self._get_offset,
+                    display_precision=1e-9,
                 ),
             ],
             actions=[
@@ -142,7 +152,7 @@ class SimPowerMeter:
     def _raw_sample_w(self) -> float:
         true_w = self._coupling * self._source_mw() * 1e-3
         noise = float(self._rng.normal(0.0, self._noise_w))
-        return max(0.0, true_w + noise)
+        return true_w + noise
 
     @staticmethod
     def _validate_choice(value: str, choices: tuple[str, ...], field: str) -> str:

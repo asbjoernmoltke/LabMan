@@ -4,9 +4,11 @@ Implements the `Aligner` protocol. LabMan runs its own scan loop, so the device
 is kept in latch mode: the firmware's tracking mode maximizes signal and is
 never enabled by this driver.
 
-The piezo output voltage range (75 V / 150 V) is verified at connect time and
-never changed here — set it in the Kinesis app if it does not match
-`max_voltage_v`.
+The piezo output voltage range (75 V / 150 V) is verified at connect time. By
+default a mismatch with `max_voltage_v` is refused. With `set_voltage_range=True`
+the driver switches the range itself, ordering the steps so the real output
+voltage never rises above its current value, and persists the setting on the
+device. (The Kinesis app pushes its own 75 V default whenever it connects.)
 
 Kinesis calls block, so the async methods run them in a worker thread;
 a lock serializes access to the DLL for this device.
@@ -79,6 +81,7 @@ class KinesisNanoTrak:
         startup_wait_s: float = 0.5,
         kinesis_dir: str | Path = DEFAULT_KINESIS_DIR,
         simulation: bool = False,
+        set_voltage_range: bool = False,
         _lib: Any = None,
     ) -> None:
         if float(max_voltage_v) not in (75.0, 150.0):
@@ -91,6 +94,7 @@ class KinesisNanoTrak:
         # back; ≥30 ms gives fresh readings.
         self._read_delay_s = float(read_delay_s)
         self._read_retries = int(read_retries)
+        self._set_voltage_range = bool(set_voltage_range)
         self._startup_wait_s = float(startup_wait_s)
         self._lock = threading.Lock()
         self._lib = _lib if _lib is not None else _load_library(Path(kinesis_dir))
@@ -189,13 +193,14 @@ class KinesisNanoTrak:
                 raise KinesisError(f"NT_StartPolling failed for {self._serial.decode()}")
             time.sleep(self._startup_wait_s)
             self._check(lib.NT_SetMode(self._serial, NT_MODE_LATCH), "NT_SetMode(latch)")
-            self._verify_voltage_range()
+            self._ensure_voltage_range()
         except Exception:
             self._shutdown_sync()
             raise
         logger.info("connected KNA %s (%.0f V range)", self._serial.decode(), self._max_v)
 
-    def _verify_voltage_range(self) -> None:
+    def _read_voltage_range(self) -> tuple[float, float, int]:
+        """(CH1 range V, CH2 range V, raw HV route flags) as currently set on the device."""
         lib = self._lib
         self._check(lib.NT_RequestIOsettings(self._serial), "NT_RequestIOsettings")
         time.sleep(self._startup_wait_s)
@@ -207,24 +212,80 @@ class KinesisNanoTrak:
         )
         ch1 = 150.0 if voltage_range.value & KNA_CH1_150V else 75.0
         ch2 = 150.0 if voltage_range.value & KNA_CH2_150V else 75.0
-        if ch1 != self._max_v or ch2 != self._max_v:
+        return ch1, ch2, route.value
+
+    def _ensure_voltage_range(self) -> None:
+        ch1, ch2, route = self._read_voltage_range()
+        if ch1 == self._max_v and ch2 == self._max_v:
+            return
+        if not self._set_voltage_range:
             raise KinesisError(
                 f"KNA {self._serial.decode()} output range is CH1 {ch1:.0f} V / CH2 {ch2:.0f} V "
-                f"but max_voltage_v is {self._max_v:.0f} V. Set the range in Kinesis; "
-                "LabMan never changes it."
+                f"but max_voltage_v is {self._max_v:.0f} V. Set the range in Kinesis, or pass "
+                "set_voltage_range: true to let LabMan switch it."
             )
+        self._switch_voltage_range((ch1, ch2), route)
 
-    def _get_position_sync(self) -> tuple[float, float]:
+    def _switch_voltage_range(self, old_ranges: tuple[float, float], route: int) -> None:
+        """Switch both outputs to `max_voltage_v`, keeping their real voltages.
+
+        The position is a fraction of the range, so switching range at a fixed
+        position scales the real voltage. To never exceed the current voltage:
+        channels whose range goes up get their position lowered *before* the
+        switch, channels whose range goes down get it raised *after* the switch.
+        Either way the output only dips briefly, then returns to its old voltage.
+        """
+        serial = self._serial.decode()
+        new_range = self._max_v
+        old_words = self._get_words_sync()
+        volts = [w / WORD_MAX * r for w, r in zip(old_words, old_ranges, strict=True)]
+        if any(v > new_range for v in volts):
+            raise KinesisError(
+                f"KNA {serial} outputs are at H {volts[0]:.2f} V / V {volts[1]:.2f} V, above the "
+                f"{new_range:.0f} V range; lower them before switching range"
+            )
+        target = [round(v / new_range * WORD_MAX) for v in volts]
+        first = [t if new_range > r else w
+                 for t, w, r in zip(target, old_words, old_ranges, strict=True)]
+
+        logger.warning(
+            "KNA %s: switching output range CH1 %.0f V / CH2 %.0f V -> %.0f V, keeping outputs "
+            "at H %.2f V / V %.2f V", serial, old_ranges[0], old_ranges[1], new_range, *volts,
+        )
+        self._move_sync(HVComponent(*first))
+        flags = (KNA_CH1_150V | KNA_CH2_150V) if new_range == 150.0 else 0
+        self._check(self._lib.NT_SetIOsettings(self._serial, flags, route), "NT_SetIOsettings")
+        time.sleep(self._startup_wait_s)
+        self._move_sync(HVComponent(*target))
+        if not self._lib.NT_PersistSettings(self._serial):
+            logger.warning("KNA %s: NT_PersistSettings failed; the range may revert after a "
+                           "power cycle", serial)
+
+        ch1, ch2, _route = self._read_voltage_range()
+        if ch1 != new_range or ch2 != new_range:
+            raise KinesisError(
+                f"KNA {serial}: switching the output range to {new_range:.0f} V did not take "
+                f"(device reports CH1 {ch1:.0f} V / CH2 {ch2:.0f} V)"
+            )
+        words = self._get_words_sync()
+        if any(abs(w - t) > 2 for w, t in zip(words, target, strict=True)):
+            raise KinesisError(
+                f"KNA {serial}: position after the range switch is {words}, expected {target}"
+            )
+        logger.warning("KNA %s: output range now %.0f V", serial, new_range)
+
+    def _get_words_sync(self) -> tuple[int, int]:
         position = HVComponent()
         with self._lock:
             self._check(
                 self._lib.NT_GetCirclePosition(self._serial, ctypes.byref(position)),
                 "NT_GetCirclePosition",
             )
-        return (
-            self._to_volts(position.horizontalComponent),
-            self._to_volts(position.verticalComponent),
-        )
+        return position.horizontalComponent, position.verticalComponent
+
+    def _get_position_sync(self) -> tuple[float, float]:
+        h, v = self._get_words_sync()
+        return self._to_volts(h), self._to_volts(v)
 
     def _move_sync(self, position: HVComponent) -> None:
         with self._lock:
@@ -347,6 +408,8 @@ def _configure_signatures(lib: ctypes.CDLL) -> None:
         "NT_RequestReading": (ctypes.c_short, [serial]),
         "NT_GetReading": (ctypes.c_short, [serial, ctypes.POINTER(TIAReading)]),
         "NT_RequestIOsettings": (ctypes.c_short, [serial]),
+        "NT_SetIOsettings": (ctypes.c_short, [serial, ctypes.c_uint16, ctypes.c_uint16]),
+        "NT_PersistSettings": (ctypes.c_bool, [serial]),
         "NT_GetIOsettings": (
             ctypes.c_short,
             [serial, ctypes.POINTER(ctypes.c_uint16), ctypes.POINTER(ctypes.c_uint16)],

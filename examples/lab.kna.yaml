@@ -1,8 +1,10 @@
 # Real Thorlabs KNA-IR (K-Cube NanoTrak) for fiber-incoupling auto-alignment.
 #
 # Before first use:
-#   1. In the Kinesis app, set both HV outputs to the 150 V range, then close
-#      Kinesis (only one program can hold the device).
+#   1. Close the Kinesis app (only one program can hold the device). Kinesis
+#      resets the HV outputs to its 75 V default whenever it connects;
+#      `set_voltage_range: true` below switches them back to 150 V on connect,
+#      keeping the real output voltages (outputs dip briefly during the switch).
 #   2. Serial numbers below are for the lab's KNA-IR (S/N 57535374); change
 #      both if you use a different unit.
 #
@@ -20,4 +22,5 @@ devices:
     args:
       serial_no: "57535374"
       max_voltage_v: 150
+      set_voltage_range: true
     sync_policy: hydrate

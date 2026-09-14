@@ -1,5 +1,6 @@
 """KinesisNanoTrak driver against a fake Kinesis DLL (no hardware, no real DLL)."""
 
+import logging
 import math
 from pathlib import Path
 
@@ -31,6 +32,19 @@ class FakeNanoTrakLib:
         self.reading_queue: list[tuple[float, int, int, int]] = []
         self.reading_requests = 0
         self.identified = False
+        self.route_flags = 0
+        self.accept_io = True     # False: NT_SetIOsettings "succeeds" but has no effect
+        self.persist_ok = True
+        self.events: list[tuple] = []
+        self.peak_volts = [0.0, 0.0]
+
+    def volts(self) -> list[float]:
+        """Real output voltages for the current position and range."""
+        return [w / 65535 * (150.0 if self.range_flags & flag else 75.0)
+                for w, flag in zip(self.position, (0x01, 0x10), strict=True)]
+
+    def _track_peak(self) -> None:
+        self.peak_volts = [max(p, v) for p, v in zip(self.peak_volts, self.volts(), strict=True)]
 
     def TLI_InitializeSimulations(self):  # noqa: N802
         self.simulations = True
@@ -61,8 +75,19 @@ class FakeNanoTrakLib:
 
     def NT_GetIOsettings(self, serial, voltage_range, route):  # noqa: N802
         voltage_range._obj.value = self.range_flags
-        route._obj.value = 0
+        route._obj.value = self.route_flags
         return 0
+
+    def NT_SetIOsettings(self, serial, voltage_range, route):  # noqa: N802
+        self.events.append(("io", voltage_range, route))
+        if self.accept_io:
+            self.range_flags = voltage_range
+            self._track_peak()
+        return 0
+
+    def NT_PersistSettings(self, serial):  # noqa: N802
+        self.events.append(("persist",))
+        return self.persist_ok
 
     def NT_SetCircleHomePosition(self, serial, position):  # noqa: N802
         self.home = (position._obj.horizontalComponent, position._obj.verticalComponent)
@@ -70,6 +95,8 @@ class FakeNanoTrakLib:
 
     def NT_HomeCircle(self, serial):  # noqa: N802
         self.position = self.home
+        self.events.append(("move", self.position))
+        self._track_peak()
         return 0
 
     def NT_GetCirclePosition(self, serial, position):  # noqa: N802
@@ -133,6 +160,98 @@ def test_75v_configuration_accepted_when_declared() -> None:
 def test_mixed_channel_ranges_are_refused() -> None:
     with pytest.raises(KinesisError, match="CH1 150 V / CH2 75 V"):
         _driver(FakeNanoTrakLib(range_flags=0x01))
+
+
+# ----- opt-in output range switching -----
+
+
+def _lib_at(range_flags: int, words: tuple[int, int]) -> FakeNanoTrakLib:
+    lib = FakeNanoTrakLib(range_flags=range_flags)
+    lib.position = words
+    lib.peak_volts = lib.volts()
+    return lib
+
+
+def _kinds(lib: FakeNanoTrakLib) -> list[str]:
+    return [event[0] for event in lib.events]
+
+
+def test_without_opt_in_the_range_is_never_changed() -> None:
+    lib = _lib_at(0x00, (1000, 1000))
+    with pytest.raises(KinesisError, match="set_voltage_range"):
+        _driver(lib)
+    assert not {"io", "persist", "move"} & set(_kinds(lib))
+
+
+def test_matching_range_with_opt_in_changes_nothing() -> None:
+    lib = _lib_at(0x11, (1000, 1000))
+    _driver(lib, set_voltage_range=True)
+    assert lib.events == []
+
+
+def test_switch_75_to_150_lowers_position_first_and_keeps_voltage() -> None:
+    lib = _lib_at(0x00, (60000, 40000))  # 68.67 V / 45.78 V on the 75 V range
+    lib.route_flags = 0x100
+    before = lib.volts()
+
+    driver, _lib = _driver(lib, set_voltage_range=True)
+
+    assert lib.range_flags == 0x11
+    assert lib.position == (30000, 20000)
+    assert _kinds(lib) == ["move", "io", "move", "persist"]
+    assert lib.events[0] == ("move", (30000, 20000))      # lowered before the switch
+    assert lib.events[1] == ("io", 0x11, 0x100)             # routing flags preserved
+    assert lib.volts() == pytest.approx(before, abs=0.003)
+    assert lib.peak_volts == pytest.approx(before, abs=0.003)  # never above the start
+    assert driver.max_voltage_v == 150.0
+
+
+def test_switch_150_to_75_switches_first_then_raises_position() -> None:
+    lib = _lib_at(0x11, (30000, 20000))  # 68.67 V / 45.78 V on the 150 V range
+    before = lib.volts()
+
+    _driver(lib, max_voltage_v=75, set_voltage_range=True)
+
+    assert lib.range_flags == 0x00
+    assert lib.position == (60000, 40000)
+    assert _kinds(lib) == ["move", "io", "move", "persist"]
+    assert lib.events[0] == ("move", (30000, 20000))      # unchanged before the switch
+    assert lib.volts() == pytest.approx(before, abs=0.003)
+    assert lib.peak_volts == pytest.approx(before, abs=0.003)
+
+
+def test_switch_mixed_channels_to_150() -> None:
+    lib = _lib_at(0x01, (40000, 40000))  # CH1 on 150 V (91.6 V), CH2 on 75 V (45.8 V)
+    before = lib.volts()
+    _driver(lib, set_voltage_range=True)
+    assert lib.range_flags == 0x11
+    assert lib.position == (40000, 20000)
+    assert lib.peak_volts == pytest.approx(before, abs=0.003)
+
+
+def test_switch_refused_when_an_output_is_above_the_new_range() -> None:
+    lib = _lib_at(0x11, (50000, 1000))  # H at 114 V
+    with pytest.raises(KinesisError, match="above the 75 V range"):
+        _driver(lib, max_voltage_v=75, set_voltage_range=True)
+    assert "io" not in _kinds(lib)
+    assert lib.close_count == 1
+
+
+def test_range_switch_that_does_not_take_raises_and_closes() -> None:
+    lib = _lib_at(0x00, (1000, 1000))
+    lib.accept_io = False
+    with pytest.raises(KinesisError, match="did not take"):
+        _driver(lib, set_voltage_range=True)
+    assert lib.close_count == 1
+
+
+def test_persist_failure_is_logged_but_connection_succeeds(caplog) -> None:
+    lib = _lib_at(0x00, (1000, 1000))
+    lib.persist_ok = False
+    with caplog.at_level(logging.WARNING, logger="labman.drivers.kinesis_nanotrak"):
+        _driver(lib, set_voltage_range=True)
+    assert lib.range_flags == 0x11
+    assert "NT_PersistSettings failed" in caplog.text
 
 
 def test_open_error_code_raises() -> None:
@@ -231,3 +350,4 @@ def test_example_lab_yaml_declares_an_aligner_with_a_resource_lock() -> None:
     assert device.driver == "labman_core.drivers.KinesisNanoTrak"
     assert device.resource is not None
     assert float(device.args["max_voltage_v"]) == 150.0
+    assert device.args["set_voltage_range"] is True

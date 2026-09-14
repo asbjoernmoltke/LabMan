@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -17,7 +18,9 @@ class SimPowerMeter:
     Reads power as `coupling * laser_power_mW * 1e-3` plus Gaussian noise,
     minus any calibrated offset. Pass a `source_mw` callable that returns the
     laser power in mW; tests bind the same SimLaser to two SimPowerMeters with
-    different `coupling` values to mimic input/output ports.
+    different `coupling` values to mimic input/output ports. Alternatively pass
+    `source_laser` (any object with a `power_mw` attribute) — this is the form
+    usable from lab.yaml via `source_laser: {device: laser}`.
 
     Reads can be negative — calibrating against a higher reference and then
     reading a smaller signal is a legitimate workflow. Callers are responsible
@@ -38,9 +41,15 @@ class SimPowerMeter:
         range_setting: str = "auto",
         acq_mode: str = "medium",
         averaging: int = 10,
+        source_laser: Any | None = None,
     ) -> None:
+        if source_mw is not None and source_laser is not None:
+            raise ValueError("pass either source_mw or source_laser, not both")
         self._name = name
-        self._source_mw = source_mw or (lambda: 0.0)
+        if source_laser is not None:
+            self._source_mw = lambda: source_laser.power_mw
+        else:
+            self._source_mw = source_mw or (lambda: 0.0)
         self._coupling = float(coupling)
         self._noise_w = float(noise_w)
         self._wavelength_nm = float(wavelength_nm)

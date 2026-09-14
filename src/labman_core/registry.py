@@ -36,7 +36,7 @@ class DeviceRegistry:
             return
         for dc in self._config.devices:
             cls = _import_class(dc.driver)
-            kwargs = dict(dc.args)
+            kwargs = {k: self._resolve_arg(dc.name, v) for k, v in dc.args.items()}
             # Pass the config name only to drivers that accept it. Checked via the
             # signature rather than catching TypeError, which would mask real
             # constructor errors (e.g. a misspelled arg in lab.yaml).
@@ -44,6 +44,22 @@ class DeviceRegistry:
                 kwargs.setdefault("name", dc.name)
             self._devices[dc.name] = cls(**kwargs)
             logger.info("instantiated device %r (%s, role=%s)", dc.name, dc.driver, dc.role.value)
+
+    def _resolve_arg(self, owner: str, value: Any) -> Any:
+        """Replace `{device: <name>}` with the already-instantiated device.
+
+        Lets simulators (or drivers sharing a controller) reference each other
+        from lab.yaml. Only devices declared earlier in the file can be referenced.
+        """
+        if isinstance(value, dict) and set(value) == {"device"}:
+            ref = value["device"]
+            if ref not in self._devices:
+                raise ValueError(
+                    f"device {owner!r}: arg references {ref!r}, "
+                    "which is not declared earlier in lab.yaml"
+                )
+            return self._devices[ref]
+        return value
 
     def device(self, name: str) -> Device:
         return self._devices[name]

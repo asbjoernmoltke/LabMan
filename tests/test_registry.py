@@ -153,3 +153,39 @@ async def test_shutdown_all_continues_past_failures() -> None:
     reg.instantiate_all()
     await reg.shutdown_all()
     assert RecordingDevice.shutdowns == ["a", "b"]
+
+
+def test_device_reference_arg_passes_earlier_instance() -> None:
+    reg = DeviceRegistry(
+        _config(
+            {
+                "laser": {"driver": "labman_core.simulators.SimLaser", "role": "laser"},
+                "pm": {
+                    "driver": "labman_core.simulators.SimPowerMeter",
+                    "role": "power_meter",
+                    "args": {"source_laser": {"device": "laser"}, "coupling": 0.5,
+                             "noise_w": 0.0},
+                },
+            }
+        )
+    )
+    reg.instantiate_all()
+    reg.device("laser")._power_mw = 10.0
+    assert reg.device("pm")._source_mw() == 10.0
+
+
+def test_forward_device_reference_raises() -> None:
+    reg = DeviceRegistry(
+        _config(
+            {
+                "pm": {
+                    "driver": "labman_core.simulators.SimPowerMeter",
+                    "role": "power_meter",
+                    "args": {"source_laser": {"device": "laser"}},
+                },
+                "laser": {"driver": "labman_core.simulators.SimLaser", "role": "laser"},
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="not declared earlier"):
+        reg.instantiate_all()

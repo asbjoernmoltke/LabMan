@@ -33,7 +33,8 @@ class LabConfig:
           <name>:
             driver: <module.Class>
             role: <laser|power_meter|camera|spectrometer|stage>
-            args: { ... }            # optional, kwargs for the driver
+            args: { ... }            # optional, kwargs for the driver;
+                                     # `{device: <name>}` passes an earlier device
             sync_policy: <hydrate|push_defaults|skip>   # optional, default skip
     """
 

@@ -6,7 +6,7 @@ deferred. Update this file whenever the answer to any of those changes.
 For *rules and conventions*, see [CLAUDE.md](CLAUDE.md). This document only
 tracks state.
 
-Last updated: 2026-09-14 (lab config + device registry)
+Last updated: 2026-09-14 (lab config, device registry, shell v1)
 
 ---
 
@@ -22,7 +22,8 @@ Last updated: 2026-09-14 (lab config + device registry)
 - [x] `task.Task` Protocol — now includes `to_safe_state(devices)` per the Safety contract
 - [x] `shell.ShellServices` Protocol
 - [x] `lab_config.LabConfig` / `DeviceConfig` — `lab.yaml` v1 loader (driver dotted path, role, args, sync_policy), validated with clear errors
-- [x] `registry.DeviceRegistry` — imports + instantiates drivers from `LabConfig` (passes config `name` only if the constructor accepts it), lookup by name/role/sync policy, best-effort `shutdown_all`
+- [x] `registry.DeviceRegistry` — imports + instantiates drivers from `LabConfig` (passes config `name` only if the constructor accepts it), lookup by name/role/sync policy, best-effort `shutdown_all`; `{device: <name>}` args pass an earlier-declared device instance
+- [x] `SimPowerMeter(source_laser=...)` — lab.yaml-friendly alternative to the `source_mw` callable
 - [x] `schema.Readable.display_precision` — values below this render as "0" in panels
 - [x] `simulators.SimLaser`, `simulators.SimPowerMeter`
   - SimPowerMeter: choices/int/calibrate action, **negative reads allowed** (no clipping); power/offset readables carry `display_precision=1e-9`
@@ -36,6 +37,9 @@ Last updated: 2026-09-14 (lab config + device registry)
 - [x] `forms.build_device_panel(device)` — returns `DevicePanel(widget, setable_widgets, readable_labels, readables)`; three sections (Settings/Readouts/Actions); async commits via running loop
 - [x] `forms.sync_panel_from_device(panel, device)` — one-shot hydrate of setables from device state
 - [x] `forms.poll_readables(panel, interval_s)` — background task updates readable labels at configured rate (5 Hz default)
+- [x] `services` (Qt-free) — `discover_tasks()` via `labman.tasks` entry points (broken tasks logged + skipped); `default_bindings` (name match first, then first free device of the role, never shares a device); `validate_bindings`; `RegistryShellServices` (real `ShellServices`)
+- [x] `shell.ShellWindow` — task list | binding page (combo per binding, filtered by role) → hosts task widget and awaits `initialize()`. Switching tasks asks for confirmation, then `widget.shutdown()` + `task.to_safe_state`. Window close defers until safe-state + `registry.shutdown_all` have run.
+- [x] `shell.main()` / `python -m labman_app --lab <lab.yaml> [--data-root]` — startup error dialog if devices fail to load
 
 ### `labman_tasks.coupling_efficiency`
 - [x] `params.CouplingEfficiencyParams` (`Annotated[T, ParamMeta]` schema)
@@ -48,7 +52,7 @@ Last updated: 2026-09-14 (lab config + device registry)
 - [x] `widget.CouplingEfficiencyWidget` — three-column layout, Start/Stop/progress, async run lifecycle, live plot updates, hydrate + poll on `initialize()`, **friendly status for `AbortConditionMet`**, live buffers initialised in `__init__` (not just on Start)
 - [x] Entry-point registered in `pyproject.toml`
 
-### Tests (73 passing)
+### Tests (92 passing)
 - [x] Storage: 4 tests
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
@@ -58,28 +62,27 @@ Last updated: 2026-09-14 (lab config + device registry)
 - [x] Coupling-efficiency widget: 5 tests
 - [x] Coupling-efficiency safety: 8 tests (idempotency, missing laser, abort raises + cleans up, abort doesn't trigger when efficiency above threshold, safety on normal completion, safety on unhandled workflow error)
 - [x] Lab config: 6 tests (round trip, full config, bad version/role/sync_policy, missing driver)
-- [x] Device registry: 9 tests (instantiation w/ and w/o `name` kwarg, idempotency, role/policy lookup, bad args surface, bad driver paths, shutdown continues past failures)
+- [x] Device registry: 11 tests (instantiation w/ and w/o `name` kwarg, idempotency, role/policy lookup, bad args surface, bad driver paths, shutdown continues past failures, device references + forward-reference error)
+- [x] Shell services: 12 tests (discovery, default bindings incl. no sharing, validation errors, services resolution, `examples/lab.sim.yaml` stays valid)
+- [x] Shell window: 5 tests (binding defaults, open + hydrate, invalid bindings rejected, close runs safe state, window close deferred until safe state ran)
 
 ### Tooling / Examples
 - [x] `pyproject.toml` (hatchling, numpy, h5py, pytest-asyncio, ruff, `[app]` extra: PySide6 / qasync / pyqtgraph)
 - [x] `.gitignore`, `CLAUDE.md`, `STATUS.md`
 - [x] `tests/conftest.py` — session-scoped `qapp` fixture
-- [x] `examples/coupling_efficiency_demo.py` — full task widget against simulators + qasync loop. `DemoShell` is a stub `ShellServices`; the real shell will replace it.
+- [x] `examples/coupling_efficiency_demo.py` — single task widget against simulators, no shell (`DemoShell` stub)
+- [x] `examples/lab.sim.yaml` — simulated laser + two power meters; `python -m labman_app --lab examples/lab.sim.yaml`
 
 ---
 
-## Next up (uncommitted, logical next slice)
+## Next up (logical next slice)
 
-The Qt shell — host application that discovers tasks, binds devices to roles, and launches task widgets:
+Finishing the shell (v1 is in Done):
 
-- [ ] `labman_app/shell.py` — main window with task picker (sidebar/tab) and active task widget area
-- [ ] Task discovery via Python entry points (`importlib.metadata.entry_points(group="labman.tasks")`)
-- [ ] Example `lab.yaml` wired to simulators (loader and registry are done — see Done)
-- [ ] Real `ShellServices` implementation backed by the device registry
-- [ ] Device-binding UI — for each task's `required_bindings`, dropdown to pick from available devices of the matching role; remembered per task
-- [ ] Connect-time sync policy implementation (`hydrate` | `push_defaults` | `skip`)
+- [ ] Connect-time sync policy (`hydrate` | `push_defaults` | `skip`) — parsed and exposed by the registry, but the task widget still always hydrates. Needs the widget/shell to consult `registry.sync_policy_of`.
+- [ ] Remember device bindings per task (last-used, alongside `PresetStore`)
 - [ ] Resource manager — enforces single-connection-per-device when shell starts
-- [ ] Splash/error reporting for failed device connects
+- [ ] Per-device connect errors — today one failing driver aborts startup with a dialog; consider starting with the rest and marking the device unavailable
 
 ---
 
@@ -120,7 +123,6 @@ The Qt shell — host application that discovers tasks, binds devices to roles, 
 
 - **Cross-task dataset linking** (e.g. "this beam-profile run used the laser settings from coupling-efficiency run X") — likely a `parent_run` field in `meta.json`; not yet designed.
 - **Action-induced readable refresh** — currently readables only update on the polling tick. If an action like `calibrate` updates `offset`, you wait up to 200 ms to see it. Acceptable, or do we want immediate refresh after action completion?
-- **App-close safety** — `Task.to_safe_state` is called on workflow exit and on widget Stop; needs wiring on Qt `closeEvent` (shell territory). For SIGKILL/power-loss, hardware fail-safes are out of scope.
 
 ---
 

@@ -107,7 +107,7 @@ changes to `safety.py` and `to_safe_state` paths with extra care.
 | `AbortConditionMet` raised (user-defined guard) | Task's safe state.                                     |
 | Unhandled exception in workflow               | Task's safe state.                                       |
 | Persistence error after acquire returns       | Task's safe state (defense-in-depth in `run_headless`).  |
-| App close / window close (shell territory)    | Task's safe state, then device disconnect (TBD with shell). |
+| App close / window close / task switch (shell) | Task's safe state; on app close then `DeviceRegistry.shutdown_all`. |
 | Process killed (SIGKILL, power loss)          | NOT GUARANTEED — relies on hardware's own fail-safe.     |
 
 ### What "safe" means is task-specific

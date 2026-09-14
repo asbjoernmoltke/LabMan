@@ -1,0 +1,32 @@
+# Simulated lab: one laser feeding two power meters (coupling-efficiency setup).
+#
+# Run from repo root:
+#     python -m labman_app --lab examples/lab.sim.yaml
+#
+# Device names match the coupling-efficiency bindings, so the shell pre-selects them.
+version: 1
+devices:
+  laser:
+    driver: labman_core.simulators.SimLaser
+    role: laser
+    args:
+      max_power_mw: 50.0
+    sync_policy: hydrate
+
+  power_meter_in:
+    driver: labman_core.simulators.SimPowerMeter
+    role: power_meter
+    args:
+      source_laser: {device: laser}
+      coupling: 1.0
+      noise_w: 1.0e-10   # below display_precision (1e-9): reads "0" with laser off
+    sync_policy: hydrate
+
+  power_meter_out:
+    driver: labman_core.simulators.SimPowerMeter
+    role: power_meter
+    args:
+      source_laser: {device: laser}
+      coupling: 0.6
+      noise_w: 1.0e-10
+    sync_policy: hydrate

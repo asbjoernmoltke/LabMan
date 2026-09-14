@@ -27,4 +27,5 @@ Thumbs.db
 # LabMan runtime
 app/data/
 app/presets/
+app/state/
 *.h5

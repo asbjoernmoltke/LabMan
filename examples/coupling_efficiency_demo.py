@@ -23,6 +23,7 @@ import qasync
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from labman_core.devices import Device
+from labman_core.lab_config import DeviceSync
 from labman_core.simulators import SimLaser, SimPowerMeter
 from labman_core.storage import DEFAULT_DATA_ROOT, RunStorage, StorageOptions
 from labman_tasks.coupling_efficiency import CouplingEfficiencyTask
@@ -41,6 +42,9 @@ class DemoShell:
 
     def device(self, binding_name: str) -> Device:
         return self._devices[binding_name]
+
+    def device_sync(self, binding_name: str) -> DeviceSync:
+        return DeviceSync("hydrate")
 
     def make_storage(
         self, task_name: str, opts: StorageOptions | None = None

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from labman_app.binding_store import BindingStore
 from labman_app.services import (
     RegistryShellServices,
     candidates_for,
@@ -66,15 +67,18 @@ class ShellWindow(QMainWindow):
         registry: DeviceRegistry,
         tasks: Iterable[Task],
         data_root: Path = DEFAULT_DATA_ROOT,
+        binding_store: BindingStore | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._registry = registry
         self._tasks = list(tasks)
         self._data_root = Path(data_root)
+        self._binding_store = binding_store
         self._active: _ActiveTask | None = None
         self._binding_combos: dict[str, QComboBox] = {}
         self._binding_error = QLabel()
+        self._unavailable_label: QLabel | None = None
         self._pending: set[asyncio.Future] = set()
         self._shutdown_future: asyncio.Future | None = None
         self._shutdown_complete = False
@@ -98,9 +102,10 @@ class ShellWindow(QMainWindow):
         splitter.setSizes([200, 1200])
         self.setCentralWidget(splitter)
 
-        self.statusBar().showMessage(
-            f"{len(registry.names())} device(s), {len(self._tasks)} task(s)"
-        )
+        message = f"{len(registry.names())} device(s), {len(self._tasks)} task(s)"
+        if registry.failures:
+            message += f" — {len(registry.failures)} device(s) unavailable"
+        self.statusBar().showMessage(message)
 
     # ----- public API (also used by tests) -----
 
@@ -115,7 +120,8 @@ class ShellWindow(QMainWindow):
         layout.addWidget(QLabel("Choose a device for each binding:"))
 
         form = QFormLayout()
-        defaults = default_bindings(task.required_bindings, self._registry)
+        remembered = self._binding_store.load(task.name) if self._binding_store else None
+        defaults = default_bindings(task.required_bindings, self._registry, remembered)
         self._binding_combos = {}
         for binding, role in task.required_bindings.items():
             combo = QComboBox()
@@ -127,6 +133,19 @@ class ShellWindow(QMainWindow):
             form.addRow(f"{binding} ({role.value})", combo)
             self._binding_combos[binding] = combo
         layout.addLayout(form)
+
+        roles = set(task.required_bindings.values())
+        unavailable = [
+            f for f in self._registry.failures.values() if self._registry.role_of(f.name) in roles
+        ]
+        self._unavailable_label = None
+        if unavailable:
+            self._unavailable_label = QLabel(
+                "Unavailable: " + "; ".join(f"{f.name} — {f.message}" for f in unavailable)
+            )
+            self._unavailable_label.setWordWrap(True)
+            self._unavailable_label.setStyleSheet("color: #8a6d00;")
+            layout.addWidget(self._unavailable_label)
 
         self._binding_error = QLabel()
         self._binding_error.setWordWrap(True)
@@ -158,15 +177,24 @@ class ShellWindow(QMainWindow):
         )
 
         initialize = getattr(widget, "initialize", None)
-        if initialize is None:
-            return
-        try:
-            await initialize()
-        except Exception as e:  # noqa: BLE001
-            logger.exception("initializing %r failed", task.name)
-            await self.close_active_task()
-            self.show_binding_page(task)
-            self._binding_error.setText(f"Failed to initialize devices: {e}")
+        if initialize is not None:
+            try:
+                await initialize()
+            except Exception as e:  # noqa: BLE001
+                logger.exception("initializing %r failed", task.name)
+                await self.close_active_task()
+                self.show_binding_page(task)
+                self._binding_error.setText(f"Failed to initialize devices: {e}")
+                return
+
+        # Connect-time sync has run for these devices; later opens re-read state.
+        for device_name in services.bindings.values():
+            self._registry.mark_synced(device_name)
+        if self._binding_store is not None:
+            try:
+                self._binding_store.save(task.name, services.bindings)
+            except OSError:
+                logger.warning("could not save bindings for %r", task.name, exc_info=True)
 
     async def close_active_task(self) -> None:
         """Stop the active widget and put its hardware in the safe state. Never raises."""
@@ -287,21 +315,31 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(argv)
 
     try:
-        registry = DeviceRegistry(LabConfig.from_path(args.lab))
-        registry.instantiate_all()
+        config = LabConfig.from_path(args.lab)
     except Exception as e:  # noqa: BLE001
         logger.exception("startup failed")
-        QMessageBox.critical(
-            None, "LabMan — startup failed", f"Could not load devices from {args.lab}:\n\n{e}"
-        )
+        QMessageBox.critical(None, "LabMan — startup failed", f"Could not load {args.lab}:\n\n{e}")
         return 1
+
+    registry = DeviceRegistry(config)
+    failures = registry.instantiate_all()
+    if failures:
+        details = "\n".join(f"• {f.name} ({f.driver}): {f.message}" for f in failures.values())
+        QMessageBox.warning(
+            None,
+            "LabMan — devices unavailable",
+            f"These devices could not be started:\n\n{details}\n\n"
+            "LabMan will start without them.",
+        )
 
     import qasync
 
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
-    win = ShellWindow(registry, discover_tasks(), data_root=args.data_root)
+    win = ShellWindow(
+        registry, discover_tasks(), data_root=args.data_root, binding_store=BindingStore()
+    )
     win.resize(1400, 800)
     win.show()
 

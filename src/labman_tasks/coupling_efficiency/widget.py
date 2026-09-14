@@ -17,10 +17,10 @@ from PySide6.QtWidgets import (
 
 from labman_app.forms import (
     DevicePanel,
+    apply_sync_policy,
     build_device_panel,
     build_params_form,
     poll_readables,
-    sync_panel_from_device,
 )
 from labman_core.context import TaskContext
 from labman_core.exceptions import AbortConditionMet
@@ -76,14 +76,14 @@ class CouplingEfficiencyWidget(QWidget):
         outer.addWidget(splitter)
 
     async def initialize(self) -> None:
-        """Per-device hydrate sync + start readable polling.
+        """Per-device connect-time sync (policy from the shell) + start readable polling.
 
         Call once after construction, while an asyncio loop is running. The
-        shell will eventually do this automatically when a task is launched.
+        shell does this when a task is opened.
         """
         for binding_name, device in self._devices.items():
             panel = self._device_panels[binding_name]
-            await sync_panel_from_device(panel, device)
+            await apply_sync_policy(panel, device, self._shell.device_sync(binding_name))
             self._poll_tasks.append(asyncio.create_task(poll_readables(panel)))
 
     def shutdown(self) -> None:

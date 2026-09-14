@@ -159,6 +159,10 @@ The shell resolves each binding against connected devices of that role (user
 picks per binding from a dropdown). Tasks access devices via
 `ctx.devices["power_meter_in"]`.
 
+The last bindings used per task are remembered in `app/state/bindings.json`
+(`BindingStore`, in `labman-app`) and pre-selected when still valid. Bindings
+describe lab wiring, not measurement parameters, so they are not presets.
+
 ## Schema pattern — params & device controls
 
 ### Task params
@@ -226,11 +230,24 @@ holds the connection, no external agent can change device state. Therefore:
 
 - **Widget is the source of truth for setables** after connect.
 - **No polling of setables.** Readables are polled on a configured interval.
-- **Connect-time sync policy** per device (from `lab.yaml`):
-  - `hydrate` — read current hardware state into widget (default for stateful
-    instruments like lasers).
-  - `push_defaults` — write defaults to hardware.
+- **Connect-time sync policy** per device (`sync_policy` in `lab.yaml`):
+  - `hydrate` (default) — read current hardware state into widget.
+  - `push_defaults` — write the device's `defaults:` mapping (setable → value,
+    in declaration order), then hydrate. A failed write aborts opening the task
+    (its safe state runs).
   - `skip` — widget starts blank; no initial read/write.
+
+  The policy applies on a device's first successful use per session. Later task
+  opens hydrate (`skip` stays `skip`), so defaults never clobber state another
+  task set.
+- **Exclusivity is enforced, not just assumed.** A device with `resource:` in
+  `lab.yaml` holds an OS file lock on that resource while LabMan runs (released
+  by the OS if the process dies); a second LabMan process sees the device as
+  unavailable. Resource strings must be unique within a `lab.yaml`. Devices
+  without `resource:` (simulators) are not locked.
+- **Unavailable devices don't block startup.** A device that fails to come up
+  (driver error, resource busy, depends on a failed device) is reported and
+  excluded from binding; the rest of the lab works.
 
 ### Commit semantics
 

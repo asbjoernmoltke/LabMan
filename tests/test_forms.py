@@ -148,6 +148,66 @@ async def test_sync_panel_from_device_hydrates_widgets(qapp) -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_sync_policy_skip_touches_nothing(qapp) -> None:
+    from labman_app.forms import apply_sync_policy, build_device_panel
+    from labman_core.lab_config import DeviceSync
+
+    laser = SimLaser(max_power_mw=100.0)
+    await laser.set_wavelength_nm(1310.0)
+    panel = build_device_panel(laser)
+
+    await apply_sync_policy(panel, laser, DeviceSync("skip"))
+
+    with pytest.raises(ValueError, match="empty"):  # widget still blank
+        panel.setable_widgets["wavelength"].value()
+    assert laser.wavelength_nm == 1310.0
+
+
+@pytest.mark.asyncio
+async def test_apply_sync_policy_hydrate_reads_device(qapp) -> None:
+    from labman_app.forms import apply_sync_policy, build_device_panel
+    from labman_core.lab_config import DeviceSync
+
+    laser = SimLaser(max_power_mw=100.0)
+    await laser.set_power_mw(12.5)
+    panel = build_device_panel(laser)
+
+    await apply_sync_policy(panel, laser, DeviceSync("hydrate"))
+
+    assert panel.setable_widgets["power"].value() == pytest.approx(12.5)
+
+
+@pytest.mark.asyncio
+async def test_apply_sync_policy_push_defaults_writes_then_hydrates(qapp) -> None:
+    from labman_app.forms import apply_sync_policy, build_device_panel
+    from labman_core.lab_config import DeviceSync
+
+    laser = SimLaser(max_power_mw=100.0)
+    await laser.set_power_mw(30.0)
+    panel = build_device_panel(laser)
+
+    await apply_sync_policy(
+        panel, laser, DeviceSync("push_defaults", {"wavelength": 1310.0, "enabled": False})
+    )
+
+    assert laser.wavelength_nm == 1310.0
+    assert panel.setable_widgets["wavelength"].value() == pytest.approx(1310.0)
+    # Setables without a default are hydrated, not reset.
+    assert panel.setable_widgets["power"].value() == pytest.approx(30.0)
+
+
+@pytest.mark.asyncio
+async def test_apply_sync_policy_unknown_default_raises(qapp) -> None:
+    from labman_app.forms import apply_sync_policy, build_device_panel
+    from labman_core.lab_config import DeviceSync
+
+    laser = SimLaser()
+    panel = build_device_panel(laser)
+    with pytest.raises(ValueError, match="unknown setable 'wavelenght'"):
+        await apply_sync_policy(panel, laser, DeviceSync("push_defaults", {"wavelenght": 1.0}))
+
+
+@pytest.mark.asyncio
 async def test_poll_readables_updates_label(qapp) -> None:
     from labman_app.forms import build_device_panel, poll_readables
 

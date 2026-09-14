@@ -1,6 +1,7 @@
 from typing import Protocol, runtime_checkable
 
 from labman_core.devices import Device
+from labman_core.lab_config import DeviceSync
 from labman_core.storage import RunStorage, StorageOptions
 
 
@@ -15,6 +16,10 @@ class ShellServices(Protocol):
     """
 
     def device(self, binding_name: str) -> Device: ...
+
+    def device_sync(self, binding_name: str) -> DeviceSync:
+        """Connect-time sync the widget applies to this binding's panel."""
+        ...
 
     def make_storage(
         self, task_name: str, opts: StorageOptions | None = None

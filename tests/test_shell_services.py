@@ -8,7 +8,7 @@ from labman_app.services import (
     discover_tasks,
     validate_bindings,
 )
-from labman_core.lab_config import LabConfig
+from labman_core.lab_config import DeviceSync, LabConfig
 from labman_core.registry import DeviceRegistry
 from labman_core.roles import DeviceRole
 from labman_tasks.coupling_efficiency import CouplingEfficiencyTask
@@ -18,6 +18,7 @@ REQUIRED = CouplingEfficiencyTask.required_bindings
 
 LASER = {"driver": "labman_core.simulators.SimLaser", "role": "laser"}
 PM = {"driver": "labman_core.simulators.SimPowerMeter", "role": "power_meter"}
+BROKEN_PM = {"driver": "no_such_pkg.Meter", "role": "power_meter"}
 
 
 def _registry(devices: dict) -> DeviceRegistry:
@@ -60,6 +61,40 @@ def test_default_bindings_never_shares_a_device() -> None:
     assert bindings["power_meter_out"] is None
 
 
+def test_default_bindings_prefers_remembered() -> None:
+    reg = _registry({"laser": LASER, "pm_a": PM, "pm_b": PM})
+    remembered = {"power_meter_in": "pm_b", "power_meter_out": "pm_a"}
+    assert default_bindings(REQUIRED, reg, remembered) == {
+        "laser": "laser",
+        "power_meter_in": "pm_b",
+        "power_meter_out": "pm_a",
+    }
+
+
+def test_remembered_beats_name_match() -> None:
+    reg = _registry({"laser": LASER, "power_meter_in": PM, "power_meter_out": PM})
+    remembered = {"power_meter_in": "power_meter_out"}
+    assert default_bindings(REQUIRED, reg, remembered) == {
+        "laser": "laser",
+        "power_meter_in": "power_meter_out",
+        "power_meter_out": "power_meter_in",
+    }
+
+
+def test_stale_remembered_bindings_are_ignored() -> None:
+    reg = _registry({"laser": LASER, "pm_a": PM, "pm_b": PM, "pm_gone": BROKEN_PM})
+    remembered = {
+        "laser": "pm_a",               # wrong role
+        "power_meter_in": "pm_gone",   # unavailable
+        "power_meter_out": "removed",  # no longer in lab.yaml
+    }
+    assert default_bindings(REQUIRED, reg, remembered) == {
+        "laser": "laser",
+        "power_meter_in": "pm_a",
+        "power_meter_out": "pm_b",
+    }
+
+
 def test_validate_bindings_ok() -> None:
     reg = _registry({"laser": LASER, "pm_a": PM, "pm_b": PM})
     ok = {"laser": "laser", "power_meter_in": "pm_a", "power_meter_out": "pm_b"}
@@ -73,10 +108,11 @@ def test_validate_bindings_ok() -> None:
         ({"laser": "laser", "power_meter_in": "pm_a", "power_meter_out": "zz"}, "unknown"),
         ({"laser": "pm_b", "power_meter_in": "pm_a", "power_meter_out": "laser"}, "expected"),
         ({"laser": "laser", "power_meter_in": "pm_a", "power_meter_out": "pm_a"}, "already"),
+        ({"laser": "laser", "power_meter_in": "pm_a", "power_meter_out": "pm_x"}, "unavailable"),
     ],
 )
 def test_validate_bindings_errors(bindings: dict, fragment: str) -> None:
-    reg = _registry({"laser": LASER, "pm_a": PM, "pm_b": PM})
+    reg = _registry({"laser": LASER, "pm_a": PM, "pm_b": PM, "pm_x": BROKEN_PM})
     errors = validate_bindings(REQUIRED, bindings, reg)
     assert any(fragment in e for e in errors), errors
 
@@ -92,9 +128,19 @@ def test_registry_shell_services_resolves_bindings(tmp_path: Path) -> None:
     assert storage.root.is_relative_to(tmp_path / "coupling_efficiency")
 
 
+def test_registry_shell_services_device_sync() -> None:
+    reg = _registry(
+        {"laser": {**LASER, "sync_policy": "push_defaults", "defaults": {"power": 1.0}}}
+    )
+    services = RegistryShellServices(reg, {"laser": "laser"})
+    assert services.device_sync("laser") == DeviceSync("push_defaults", {"power": 1.0})
+    reg.mark_synced("laser")
+    assert services.device_sync("laser") == DeviceSync("hydrate")
+
+
 async def test_example_lab_yaml_wires_simulators() -> None:
     reg = DeviceRegistry(LabConfig.from_path(EXAMPLE_LAB))
-    reg.instantiate_all()
+    assert reg.instantiate_all() == {}
     assert default_bindings(REQUIRED, reg) == {b: b for b in REQUIRED}
     assert reg.role_of("power_meter_out") == DeviceRole.POWER_METER
 

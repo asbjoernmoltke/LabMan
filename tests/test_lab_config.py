@@ -32,7 +32,9 @@ def test_minimal_config_round_trip(tmp_path: Path) -> None:
     assert laser.driver == "labman_core.simulators.SimLaser"
     assert laser.role == DeviceRole.LASER
     assert laser.args == {}
-    assert laser.sync_policy == "skip"
+    assert laser.sync_policy == "hydrate"
+    assert laser.defaults == {}
+    assert laser.resource is None
 
 
 def test_full_config(tmp_path: Path) -> None:
@@ -113,3 +115,50 @@ def test_unknown_sync_policy_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="sync_policy"):
         LabConfig.from_path(cfg_path)
+
+
+LASER = {"driver": "labman_core.simulators.SimLaser", "role": "laser"}
+
+
+def _devices(**devices: dict) -> LabConfig:
+    return LabConfig.from_dict({"version": 1, "devices": devices})
+
+
+def test_push_defaults_with_defaults_and_resource() -> None:
+    cfg = _devices(
+        laser={
+            **LASER,
+            "sync_policy": "push_defaults",
+            "defaults": {"wavelength": 1310.0, "power": 0.0},
+            "resource": "GPIB0::5::INSTR",
+        }
+    )
+    laser = cfg.devices[0]
+    assert laser.sync_policy == "push_defaults"
+    assert list(laser.defaults.items()) == [("wavelength", 1310.0), ("power", 0.0)]
+    assert laser.resource == "GPIB0::5::INSTR"
+
+
+def test_push_defaults_without_defaults_raises() -> None:
+    with pytest.raises(ValueError, match="requires `defaults`"):
+        _devices(laser={**LASER, "sync_policy": "push_defaults"})
+
+
+def test_defaults_without_push_policy_raises() -> None:
+    with pytest.raises(ValueError, match="only apply"):
+        _devices(laser={**LASER, "defaults": {"power": 1.0}})
+
+
+def test_defaults_must_be_mapping() -> None:
+    with pytest.raises(ValueError, match="`defaults` must be a mapping"):
+        _devices(laser={**LASER, "sync_policy": "push_defaults", "defaults": [1, 2]})
+
+
+def test_blank_resource_raises() -> None:
+    with pytest.raises(ValueError, match="resource"):
+        _devices(laser={**LASER, "resource": "  "})
+
+
+def test_duplicate_resource_raises() -> None:
+    with pytest.raises(ValueError, match="both claim resource 'COM3'"):
+        _devices(a={**LASER, "resource": "COM3"}, b={**LASER, "resource": "COM3"})

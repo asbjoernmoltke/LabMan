@@ -22,6 +22,7 @@ from labman_app.widgets.choice import ChoiceInput
 from labman_app.widgets.numeric import NumericInput
 from labman_app.widgets.optional import OptionalWrapper
 from labman_app.widgets.text import TextInput
+from labman_core.lab_config import DeviceSync
 from labman_core.schema import Action, ParamMeta, Readable, Setable
 
 
@@ -128,6 +129,32 @@ async def sync_panel_from_device(panel: DevicePanel, device: Any) -> None:
         except Exception:
             continue
         widget.set_value(value)
+
+
+async def apply_sync_policy(panel: DevicePanel, device: Any, sync: DeviceSync) -> None:
+    """Connect-time sync of a device panel (Hardware exclusivity in CLAUDE.md).
+
+    - hydrate:       read every setable into its widget.
+    - push_defaults: write `sync.defaults` to the device in declaration order,
+                     then hydrate so every widget reflects the hardware.
+    - skip:          nothing; widgets keep their initial values.
+
+    A failed default write raises: the device is in a partially configured
+    state and the caller must surface that rather than carry on.
+    """
+    if sync.policy == "skip":
+        return
+    if sync.policy == "push_defaults":
+        setables = {s.name: s for s in device.controls().setables}
+        for name, value in sync.defaults.items():
+            setable = setables.get(name)
+            if setable is None:
+                raise ValueError(
+                    f"{device.name}: default for unknown setable {name!r}; "
+                    f"available: {sorted(setables)}"
+                )
+            await setable.set(value)
+    await sync_panel_from_device(panel, device)
 
 
 async def poll_readables(panel: DevicePanel, interval_s: float = 0.2) -> None:

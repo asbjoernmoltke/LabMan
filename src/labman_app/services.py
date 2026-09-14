@@ -11,6 +11,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 
 from labman_core.devices import Device
+from labman_core.lab_config import DeviceSync
 from labman_core.registry import DeviceRegistry
 from labman_core.roles import DeviceRole
 from labman_core.storage import DEFAULT_DATA_ROOT, RunStorage, StorageOptions
@@ -44,29 +45,44 @@ def candidates_for(role: DeviceRole, registry: DeviceRegistry) -> list[str]:
 
 
 def default_bindings(
-    required: dict[str, DeviceRole], registry: DeviceRegistry
+    required: dict[str, DeviceRole],
+    registry: DeviceRegistry,
+    remembered: dict[str, str] | None = None,
 ) -> dict[str, str | None]:
     """Propose a device per binding.
 
-    A device whose name equals the binding name wins. Remaining bindings get
-    the first device of the right role not already taken. A binding with no
-    free candidate gets None — never silently share one device between two
-    bindings (e.g. power_meter_in and power_meter_out on the same meter).
+    Priority per binding: the remembered device (if still available with the
+    right role), then a device whose name equals the binding name, then the
+    first free device of the role. A binding with no free candidate gets None —
+    never silently share one device between two bindings (e.g. power_meter_in
+    and power_meter_out on the same meter).
     """
-    chosen: dict[str, str | None] = {}
+    remembered = remembered or {}
+    chosen: dict[str, str] = {}
     used: set[str] = set()
+
+    def take(binding: str, device: str) -> None:
+        chosen[binding] = device
+        used.add(device)
+
     for binding, role in required.items():
-        if binding in candidates_for(role, registry):
-            chosen[binding] = binding
-            used.add(binding)
+        device = remembered.get(binding)
+        if device and device not in used and device in candidates_for(role, registry):
+            take(binding, device)
+    for binding, role in required.items():
+        if (
+            binding not in chosen
+            and binding not in used
+            and binding in candidates_for(role, registry)
+        ):
+            take(binding, binding)
     for binding, role in required.items():
         if binding in chosen:
             continue
         free = [n for n in candidates_for(role, registry) if n not in used]
-        chosen[binding] = free[0] if free else None
         if free:
-            used.add(free[0])
-    return {b: chosen[b] for b in required}
+            take(binding, free[0])
+    return {b: chosen.get(b) for b in required}
 
 
 def validate_bindings(
@@ -77,11 +93,15 @@ def validate_bindings(
     """Return human-readable problems; empty list means the bindings are usable."""
     errors: list[str] = []
     known = set(registry.names())
+    failures = registry.failures
     seen: dict[str, str] = {}
     for binding, role in required.items():
         device = bindings.get(binding)
         if not device:
             errors.append(f"{binding}: no device selected")
+            continue
+        if device in failures:
+            errors.append(f"{binding}: {device!r} is unavailable ({failures[device].message})")
             continue
         if device not in known:
             errors.append(f"{binding}: unknown device {device!r}")
@@ -117,6 +137,9 @@ class RegistryShellServices:
 
     def device(self, binding_name: str) -> Device:
         return self._registry.device(self._bindings[binding_name])
+
+    def device_sync(self, binding_name: str) -> DeviceSync:
+        return self._registry.connect_sync(self._bindings[binding_name])
 
     def bound_devices(self) -> dict[str, Device]:
         return {b: self._registry.device(name) for b, name in self._bindings.items()}

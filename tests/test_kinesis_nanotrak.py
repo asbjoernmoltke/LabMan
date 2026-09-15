@@ -61,6 +61,7 @@ class FakeNanoTrakLib:
 
     def NT_StartPolling(self, serial, ms):  # noqa: N802
         self.polling = True
+        self.poll_ms = ms
         return True
 
     def NT_StopPolling(self, serial):  # noqa: N802
@@ -128,6 +129,12 @@ def _driver(
     lib = lib or FakeNanoTrakLib()
     options = {"max_voltage_v": 150.0, "startup_wait_s": 0.0, "read_delay_s": 0.0, **kwargs}
     return KinesisNanoTrak("57000001", _lib=lib, **options), lib
+
+
+def test_default_polling_is_slow_enough_for_the_kna() -> None:
+    """Regression: 20 ms polling froze the KNA's status/readings on hardware."""
+    _dev, lib = _driver()
+    assert lib.poll_ms == 200
 
 
 def test_connect_opens_polls_and_latches() -> None:

@@ -75,7 +75,10 @@ class KinesisNanoTrak:
         serial_no: str | int,
         name: str = "nanotrak",
         max_voltage_v: float = 150.0,
-        poll_ms: int = 20,
+        # Hardware (S/N 57535374, 2026-09-15): at 20 ms the KNA stopped sending status and
+        # readings after a burst of moves, until a USB replug. 200 ms (as in Thorlabs'
+        # examples) stayed fresh even with a move every 20 ms.
+        poll_ms: int = 200,
         read_delay_s: float = 0.05,
         read_retries: int = 2,
         startup_wait_s: float = 0.5,

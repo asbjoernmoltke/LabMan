@@ -27,8 +27,9 @@ class FakeNanoTrakLib:
         self.simulations = False
         self.home = (0, 0)
         self.position = (0, 0)
-        self.reading = (1.5e-7, 1)
-        # Optional queue of (absolute, range_state, relative, range_code), consumed per read.
+        # (absolute, range_state, relative, range_code); 9828/32767 x 500 nA = 150 nA
+        self.reading: tuple[float, int, int, int] = (5.4e-8, 1, 9828, 7)
+        # Optional queue of readings in the same form, consumed per read.
         self.reading_queue: list[tuple[float, int, int, int]] = []
         self.reading_requests = 0
         self.identified = False
@@ -109,12 +110,10 @@ class FakeNanoTrakLib:
         return 0
 
     def NT_GetReading(self, serial, reading):  # noqa: N802
-        if self.reading_queue:
-            absolute, state, relative, range_code = self.reading_queue.pop(0)
-            reading._obj.relativeReading = relative
-            reading._obj.selectedRange = range_code
-        else:
-            absolute, state = self.reading
+        source = self.reading_queue.pop(0) if self.reading_queue else self.reading
+        absolute, state, relative, range_code = source
+        reading._obj.relativeReading = relative
+        reading._obj.selectedRange = range_code
         reading._obj.absoluteReading = absolute
         reading._obj.underOrOverRead = state
         return 0
@@ -287,43 +286,43 @@ async def test_move_outside_range_never_reaches_the_device() -> None:
     assert lib.home == (0, 0)
 
 
-async def test_read_signal_maps_range_flag() -> None:
+async def test_signal_is_relative_reading_times_range_full_scale() -> None:
     driver, lib = _driver()
     reading = await driver.read_signal()
-    assert reading.signal_a == pytest.approx(1.5e-7)
+    assert reading.signal_a == pytest.approx(9828 / 32767 * 500e-9)
     assert reading.in_range
-    lib.reading = (5e-3, 3)  # over range
-    assert not (await driver.read_signal()).in_range
-
-
-async def test_garbage_absolute_reading_is_retried() -> None:
-    """Seen on S/N 57535374: absolute 1.7e-38 with a normal relative value."""
-    driver, lib = _driver()
-    lib.reading_queue = [(1.717e-38, 1, 23100, 4), (4.183e-9, 1, 23100, 4)]
+    lib.reading = (5e-3, 3, 32767, 15)  # over range
     reading = await driver.read_signal()
-    assert reading.signal_a == pytest.approx(4.183e-9)
+    assert reading.signal_a == pytest.approx(5e-3)
+    assert not reading.in_range
+    lib.reading = (0.0, 2, 0, 3)  # under range / dark
+    reading = await driver.read_signal()
+    assert reading.signal_a == 0.0
+    assert not reading.in_range
+
+
+async def test_garbage_absolute_reading_is_ignored() -> None:
+    """Seen on S/N 57535374: absolute ~1e-38 with a normal relative value."""
+    driver, lib = _driver()
+    lib.reading_queue = [(1.717e-38, 1, 23100, 4)]
+    reading = await driver.read_signal()
+    assert reading.signal_a == pytest.approx(23100 / 32767 * 16.6e-9)
     assert reading.in_range
+    assert lib.reading_requests == 1
+
+
+async def test_unknown_range_code_is_retried_then_nan_out_of_range() -> None:
+    driver, lib = _driver(read_retries=1)
+    lib.reading_queue = [(4e-9, 1, 7000, 0), (4e-9, 1, 7000, 5)]
+    reading = await driver.read_signal()
+    assert reading.signal_a == pytest.approx(7000 / 32767 * 50e-9)
     assert lib.reading_requests == 2
 
-
-async def test_persistently_implausible_reading_is_nan_and_out_of_range() -> None:
-    driver, lib = _driver(read_retries=1)
-    lib.reading_queue = [(1e-38, 1, 23100, 4), (float("inf"), 1, 23100, 4)]
+    lib.reading_queue = [(4e-9, 1, 7000, 0), (4e-9, 1, 40000, 5)]  # unknown, then > full
     reading = await driver.read_signal()
     assert math.isnan(reading.signal_a)
     assert not reading.in_range
-    assert lib.reading_requests == 2
-
-
-async def test_plausibility_tolerates_constant_scale_mismatch_and_dark_readings() -> None:
-    driver, lib = _driver()
-    lib.reading_queue = [
-        (4.183e-9, 1, 23100, 4),  # 0.36 x relative·full-scale, as measured on hardware
-        (2e-13, 1, 10, 4),        # near-dark: relative < 1 %, nothing to cross-check
-    ]
-    assert (await driver.read_signal()).signal_a == pytest.approx(4.183e-9)
-    assert (await driver.read_signal()).signal_a == pytest.approx(2e-13)
-    assert lib.reading_requests == 2
+    assert lib.reading_requests == 4
 
 
 async def test_latch_identify_and_idempotent_shutdown() -> None:

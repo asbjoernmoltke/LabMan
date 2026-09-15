@@ -41,9 +41,10 @@ KNA_CH2_150V = 0x10
 WORD_MAX = 65535
 RELATIVE_FULL = 32767
 
-# KNA_TIARange code -> full-scale current (A), from the Kinesis header. Used only to
-# sanity-check absoluteReading against relativeReading, so a constant scale mismatch
-# (seen on hardware: absolute ≈ 0.36 × relative·full-scale) is tolerated.
+# KNA_TIARange code -> full-scale current (A), from the Kinesis header. The signal is
+# relativeReading / 32767 × full scale. absoluteReading is not used: on hardware it is
+# often garbage (~1e-38), and when valid it is ≈ 0.36 × this value, so stored currents
+# are consistent across ranges but not calibrated in amps.
 TIA_FULL_SCALE_A = {
     3: 5e-9, 4: 16.6e-9, 5: 50e-9, 6: 166e-9, 7: 500e-9, 8: 1.66e-6, 9: 5e-6,
     10: 16.6e-6, 11: 50e-6, 12: 166e-6, 13: 500e-6, 14: 1.66e-3, 15: 5e-3,
@@ -299,12 +300,12 @@ class KinesisNanoTrak:
             self._check(self._lib.NT_HomeCircle(self._serial), "NT_HomeCircle")
 
     def _read_signal_sync(self) -> SignalReading:
-        """One detector reading; retried if implausible.
+        """One detector reading: relativeReading scaled by the range's full scale.
 
-        On hardware the DLL occasionally returns a garbage absoluteReading (~1e-38)
-        alongside a normal relativeReading. Passed through, that looks like a
-        perfect dip. If retries don't help, return NaN flagged out of range so the
-        tracker holds instead of acting on it.
+        absoluteReading is ignored (often garbage on hardware, see TIA_FULL_SCALE_A).
+        A reading with an unknown range code or a relative value above full scale is
+        retried; if retries don't help, return NaN flagged out of range so the tracker
+        holds instead of acting on it.
         """
         for attempt in range(self._read_retries + 1):
             reading = TIAReading()
@@ -314,15 +315,15 @@ class KinesisNanoTrak:
                 self._check(
                     self._lib.NT_GetReading(self._serial, ctypes.byref(reading)), "NT_GetReading"
                 )
-            if _reading_is_plausible(reading):
+            full_scale = TIA_FULL_SCALE_A.get(int(reading.selectedRange))
+            if full_scale is not None and reading.relativeReading <= RELATIVE_FULL:
                 return SignalReading(
-                    signal_a=float(reading.absoluteReading),
+                    signal_a=reading.relativeReading / RELATIVE_FULL * full_scale,
                     in_range=reading.underOrOverRead == NT_IN_RANGE,
                 )
             logger.warning(
-                "discarding implausible KNA reading %.3g (relative %d, range %d), attempt %d",
-                reading.absoluteReading, reading.relativeReading, reading.selectedRange,
-                attempt + 1,
+                "discarding KNA reading with relative %d, range code %d, attempt %d",
+                reading.relativeReading, reading.selectedRange, attempt + 1,
             )
         return SignalReading(signal_a=math.nan, in_range=False)
 
@@ -368,19 +369,6 @@ class KinesisNanoTrak:
 
     async def _get_signal(self) -> float:
         return (await self.read_signal()).signal_a
-
-
-def _reading_is_plausible(reading: TIAReading) -> bool:
-    """absoluteReading must be finite and, when relativeReading is at least 1 % of the
-    range, within three orders of magnitude of relative × range full scale."""
-    absolute = float(reading.absoluteReading)
-    if not math.isfinite(absolute):
-        return False
-    full_scale = TIA_FULL_SCALE_A.get(int(reading.selectedRange))
-    if full_scale is None or reading.relativeReading < RELATIVE_FULL // 100:
-        return True  # nothing to cross-check against (unknown range or near-dark)
-    expected = reading.relativeReading / RELATIVE_FULL * full_scale
-    return 1e-3 * expected <= absolute <= 1e3 * expected
 
 
 def _load_library(kinesis_dir: Path) -> ctypes.CDLL:

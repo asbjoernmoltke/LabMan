@@ -167,18 +167,20 @@ class ThorlabsPM100:
             raise ThorlabsPM100Error(f"Thorlabs power meter ({wanted}) not found; found: {listed}")
         resource, model, serial, available = matches[0]
         if not available:
-            raise ThorlabsPM100Error(
-                f"Thorlabs power meter {model} S/N {serial} is in use by another program "
-                "(close Optical Power Monitor or other software)"
-            )
+            # Hardware (S/N 1931430, 2026-09-15): the flag stayed 0 with nothing else holding
+            # the meter, and opening worked. Only a failing init means the meter is busy.
+            logger.warning("%s S/N %s reports not available; trying to open anyway",
+                           model, serial)
 
         session = ctypes.c_uint32(0)
         status = self._lib.TLPMX_init(resource, ctypes.c_uint8(1), ctypes.c_uint8(0),
                                       ctypes.byref(session))
         if status < 0:
+            hint = (" — the meter reports it is in use; close Optical Power Monitor or other "
+                    "software" if not available else "")
             raise ThorlabsPM100Error(
                 f"TLPMX_init failed for {resource.decode(errors='replace')}: "
-                f"{self._error_text(session, status)}"
+                f"{self._error_text(session, status)}{hint}"
             )
         self._session = session
         self._open = True

@@ -134,9 +134,18 @@ def test_missing_meter_lists_what_was_found() -> None:
     assert lib.opened == []
 
 
-def test_meter_in_use_by_other_software_is_refused() -> None:
+def test_unavailable_flag_only_warns_and_opens() -> None:
+    """Hardware: the available flag stayed 0 although the meter opened and measured fine."""
     lib = FakeTLPMX(meters=[("PM100USB", "1931430", False)])
-    with pytest.raises(ThorlabsPM100Error, match="in use by another program"):
+    meter = ThorlabsPM100("1931430", _lib=lib)
+    assert lib.opened == [b"USB0::0x1313::0x8072::1931430::INSTR"]
+    assert meter.model == "PM100USB"
+
+
+def test_unavailable_meter_that_fails_to_open_mentions_other_software() -> None:
+    lib = FakeTLPMX(meters=[("PM100USB", "1931430", False)])
+    lib.init_status = VI_ERROR
+    with pytest.raises(ThorlabsPM100Error, match="in use; close Optical Power Monitor"):
         ThorlabsPM100("1931430", _lib=lib)
 
 

@@ -6,7 +6,7 @@ deferred. Update this file whenever the answer to any of those changes.
 For *rules and conventions*, see [CLAUDE.md](CLAUDE.md). This document only
 tracks state.
 
-Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
+Last updated: 2026-09-15 (KNA-IR bring-up on hardware, PM100 power meter driver, first tracking run, `examples/kna/` scripts)
 
 ---
 
@@ -78,7 +78,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] `examples/lab.sim.yaml` gains a simulated aligner; `examples/lab.kna.yaml` template for the real KNA
 - [x] Fixes found by the smoke test: `RunStorage` timestamp dirs no longer collide when two runs start within one second; both task widgets create storage inside `try`, so a storage error resets the UI instead of leaving Start disabled
 
-### Tests (265 passing)
+### Tests (266 passing)
 - [x] Storage: 5 tests (incl. runs started in the same second get `_1`, `_2` suffixes)
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
@@ -94,7 +94,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] Auto-alignment widget: 5 tests (map run, graceful stop saves, second Stop force-cancels, hydrate, storage failure reports error and resets UI)
 - [x] Persistence: 4 tests (nested round trip incl. None/bool/empty arrays, unsupported type, params and meta JSON)
 - [x] KinesisNanoTrak (fake DLL): 25 tests (signal from relative reading × range full scale, garbage absolute ignored, unknown range retried then NaN; position right after a move is the commanded one; connect latches, default 200 ms polling, simulator flag, voltage-range refusal closes device, opt-in range switch 75→150 / 150→75 / mixed channels never exceeding the starting voltage, refusal above new range, switch that doesn't take, persist failure, no change without opt-in or when matching, open error, V ↔ device units, out-of-range move never sent, range flag, latch/identify/idempotent shutdown, controls, example yaml)
-- [x] ThorlabsPM100 (fake TLPMX DLL): 8 tests (open by serial without reset, read power and settings incl. sensor limits, initial wavelength, missing meter lists what was found, meter in use refused, init failure reports vendor message, measurement error + idempotent shutdown, controls)
+- [x] ThorlabsPM100 (fake TLPMX DLL): 9 tests (open by serial without reset, read power and settings incl. sensor limits, initial wavelength, missing meter lists what was found, not-available flag only warns, failing init on a busy meter mentions other software, init failure reports vendor message, measurement error + idempotent shutdown, controls)
 - [x] Coupling-efficiency widget: 5 tests
 - [x] Coupling-efficiency safety: 8 tests (idempotency, missing laser, abort raises + cleans up, abort doesn't trigger when efficiency above threshold, safety on normal completion, safety on unhandled workflow error)
 - [x] Lab config: 12 tests (round trip, full config, bad version/role/sync_policy, missing driver, defaults/push_defaults rules, resource validation + duplicates)

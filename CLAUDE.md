@@ -330,6 +330,10 @@ Defined in `labman-core`:
   time; `request_stop()` / `stop_requested` for graceful stop
 - `Aligner` protocol — two piezo output voltages (V) + detector reading + `latch()`
   (Thorlabs K-Cube NanoTrak via `labman_core.drivers.KinesisNanoTrak`)
+- Real drivers live in `labman_core.drivers` (`KinesisNanoTrak`, `ThorlabsPM100` for the
+  `PowerMeter` protocol). Vendor libraries are loaded when a device is constructed, never
+  on import; blocking vendor calls go through `asyncio.to_thread`; tests use a fake DLL
+  passed as `_lib`.
 - `Task` protocol — `name`, `display_name`, `required_bindings`, `params_cls`,
   `build_widget(shell)`, `run_headless(ctx, params)`
 

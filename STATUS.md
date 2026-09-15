@@ -68,6 +68,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] Core: `DeviceRole.ALIGNER`, `Aligner` protocol + `SignalReading`; `TaskContext.request_stop()` / `stop_requested` for graceful stop
 - [x] `simulators.SimAligner` — donut (dip inside bright ring) or bowl profile, drift, noise, voltage-range checks
 - [x] `drivers.KinesisNanoTrak` — Kinesis C API via ctypes; keeps the KNA latched (firmware tracking maximizes and is never enabled); verifies the 75/150 V range and switches it only when `set_voltage_range` is enabled; blocking calls in a worker thread; shutdown latches without zeroing outputs
+- [x] `drivers.ThorlabsPM100` — Thorlabs PM100-series power meter (PM100USB) via TLPMX_64.dll and ctypes (the PM100USB uses Thorlabs' USB driver, not VISA USBTMC, so pyvisa cannot see it); opens by serial with ID query and no reset; `read_power_w`, wavelength / auto range / average time setables with sensor limits; blocking calls in a worker thread; `pm_out` in `examples/lab.kna.yaml`
 - [x] `persistence` (core) — dataclass ↔ HDF5 (nested, None, bool/int/str attrs), params/meta JSON; used by `auto_alignment` (coupling efficiency not migrated yet)
 - [x] `algorithm.py` (pure) — probe circle, plane fit + curvature, Newton step toward the dip only when the centre is confirmed lower than its ring; holds on ring/flat/out-of-range/degenerate; excursion and voltage limits; serpentine map raster
 - [x] `workflow.py` — map mode (returns to start) and continuous track mode (until Stop, duration, or a limit); every sample and cycle logged and published live; `finally` → safe state
@@ -77,7 +78,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] `examples/lab.sim.yaml` gains a simulated aligner; `examples/lab.kna.yaml` template for the real KNA
 - [x] Fixes found by the smoke test: `RunStorage` timestamp dirs no longer collide when two runs start within one second; both task widgets create storage inside `try`, so a storage error resets the UI instead of leaving Start disabled
 
-### Tests (257 passing)
+### Tests (265 passing)
 - [x] Storage: 5 tests (incl. runs started in the same second get `_1`, `_2` suffixes)
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
@@ -93,6 +94,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] Auto-alignment widget: 5 tests (map run, graceful stop saves, second Stop force-cancels, hydrate, storage failure reports error and resets UI)
 - [x] Persistence: 4 tests (nested round trip incl. None/bool/empty arrays, unsupported type, params and meta JSON)
 - [x] KinesisNanoTrak (fake DLL): 25 tests (signal from relative reading × range full scale, garbage absolute ignored, unknown range retried then NaN; position right after a move is the commanded one; connect latches, default 200 ms polling, simulator flag, voltage-range refusal closes device, opt-in range switch 75→150 / 150→75 / mixed channels never exceeding the starting voltage, refusal above new range, switch that doesn't take, persist failure, no change without opt-in or when matching, open error, V ↔ device units, out-of-range move never sent, range flag, latch/identify/idempotent shutdown, controls, example yaml)
+- [x] ThorlabsPM100 (fake TLPMX DLL): 8 tests (open by serial without reset, read power and settings incl. sensor limits, initial wavelength, missing meter lists what was found, meter in use refused, init failure reports vendor message, measurement error + idempotent shutdown, controls)
 - [x] Coupling-efficiency widget: 5 tests
 - [x] Coupling-efficiency safety: 8 tests (idempotency, missing laser, abort raises + cleans up, abort doesn't trigger when efficiency above threshold, safety on normal completion, safety on unhandled workflow error)
 - [x] Lab config: 12 tests (round trip, full config, bad version/role/sync_policy, missing driver, defaults/push_defaults rules, resource validation + duplicates)
@@ -136,6 +138,9 @@ KNA-IR hardware bring-up for `auto_alignment` (everything so far is verified aga
 - [x] TIA range gains checked on hardware (2026-09-15, fixed position, ~44 nA): manual ranges 5/6/7/8 (50 nA … 1.66 µA full scale) give 44.45 / 44.17 / 44.28 / 43.88 nA — ratios 1.006 / 1.000 / 1.003 / 0.994, within noise. Converting relative × nominal full scale is consistent across ranges, so auto-range switches do not step the maps. Range mode read and restored (auto at selected, all ranges)
 - [ ] Remaining auto-range effect: readings taken during a switch are unreliable (likely the 422 nA spike and two dark points in run 20260915T111350), and switches add delay. Store the range code per sample and drop/flag readings where the range changed; optionally a fixed manual range during a map (`NT_SetRangeMode` / `NT_SetTIARange`; at range 8, one relative count ≈ 2.5 nA)
 - [x] First coupling vs stray-light check (2026-09-15, static holds, 2.5 V ramps): 75/75 V → 9.10 mW coupled, 44.3 nA; 85/95 V (the full-range map's valley bottom) → 8.54 mW (−6 %), 47.8 → 49.4 nA while holding (+8–12 %, creep). Back at 75/75 V: 40.7 nA (hysteresis/creep offset after the round trip). Locally, more stray light goes with less coupling, as hoped; but the scanned map misplaced the valley — static, slower sampling is needed near the optimum
+- [x] PM100USB (S/N 1931430) on the lab PC through `ThorlabsPM100` (2026-09-15): model/serial/resource read, 5 readings 13.49–13.51 mW, sensor 400–1100 nm, average time 0.33 ms–10.9 s, auto range on. The meter was set to 635 nm — confirm the laser wavelength
+- [ ] Static cross with logged coupling (`static_cross.py` scratch script: ±5/±10 V on each axis, back to centre in between, KNA and PM100 alternated per point) — not yet run
+- [ ] Auto-alignment task: optional power meter binding so maps and tracking log coupled power next to the stray light
 - [x] Plots saved next to the runs: `map.png` in each run folder, `power_split.png` in 20260915T104822 (scratch matplotlib scripts)
 - [x] Driver: position right after a move — the device report lags by a polling period (the ±30 V map "ended" at 105/105 V although it had returned to 75/75 V). `get_position_v` now returns the commanded position for max(1 s, 5 × poll) after a move; the range-switch check still reads the device
 - [ ] Record coupling during a map: log the output power meter alongside the KNA signal (needs the power meter bound in the task, or a second simultaneous acquisition), so stray light can be compared with coupling point by point

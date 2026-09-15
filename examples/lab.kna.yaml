@@ -24,3 +24,13 @@ devices:
       max_voltage_v: 150
       set_voltage_range: true
     sync_policy: hydrate
+
+  # Thorlabs PM100USB at the fibre output (coupled power). Uses Thorlabs' TLPMX library
+  # (Optical Power Monitor install); close Optical Power Monitor first.
+  pm_out:
+    driver: labman_core.drivers.ThorlabsPM100
+    role: power_meter
+    resource: "tlpm:1931430"
+    args:
+      serial_no: "1931430"
+    sync_policy: hydrate

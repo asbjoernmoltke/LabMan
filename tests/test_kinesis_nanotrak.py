@@ -367,7 +367,7 @@ async def test_controls_expose_voltages_and_signal() -> None:
 
 def test_example_lab_yaml_declares_an_aligner_with_a_resource_lock() -> None:
     config = LabConfig.from_path(KNA_LAB)
-    (device,) = config.devices
+    (device,) = [d for d in config.devices if d.role == DeviceRole.ALIGNER]
     assert device.role == DeviceRole.ALIGNER
     assert device.driver == "labman_core.drivers.KinesisNanoTrak"
     assert device.resource is not None

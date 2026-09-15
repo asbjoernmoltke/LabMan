@@ -103,6 +103,12 @@ class KinesisNanoTrak:
         self._lock = threading.Lock()
         self._lib = _lib if _lib is not None else _load_library(Path(kinesis_dir))
         self._open = False
+        # The device's position report only updates with polling, so right after a move
+        # it still shows the old position (seen on hardware at 200 ms: a map "ended" at its
+        # last grid point although the return move had happened). Trust the last
+        # commanded position for a few polling periods.
+        self._last_move: tuple[tuple[int, int], float] | None = None
+        self._position_stale_s = max(1.0, 5 * self._poll_ms / 1000)
         self._connect(simulation)
 
     # ----- Aligner protocol -----
@@ -288,7 +294,11 @@ class KinesisNanoTrak:
         return position.horizontalComponent, position.verticalComponent
 
     def _get_position_sync(self) -> tuple[float, float]:
-        h, v = self._get_words_sync()
+        last = self._last_move
+        if last is not None and time.monotonic() - last[1] < self._position_stale_s:
+            h, v = last[0]
+        else:
+            h, v = self._get_words_sync()
         return self._to_volts(h), self._to_volts(v)
 
     def _move_sync(self, position: HVComponent) -> None:
@@ -298,6 +308,9 @@ class KinesisNanoTrak:
                 "NT_SetCircleHomePosition",
             )
             self._check(self._lib.NT_HomeCircle(self._serial), "NT_HomeCircle")
+            self._last_move = (
+                (position.horizontalComponent, position.verticalComponent), time.monotonic()
+            )
 
     def _read_signal_sync(self) -> SignalReading:
         """One detector reading: relativeReading scaled by the range's full scale.

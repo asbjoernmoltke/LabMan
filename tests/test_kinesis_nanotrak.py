@@ -27,6 +27,7 @@ class FakeNanoTrakLib:
         self.simulations = False
         self.home = (0, 0)
         self.position = (0, 0)
+        self.stale_position: tuple[int, int] | None = None
         # (absolute, range_state, relative, range_code); 9828/32767 x 500 nA = 150 nA
         self.reading: tuple[float, int, int, int] = (5.4e-8, 1, 9828, 7)
         # Optional queue of readings in the same form, consumed per read.
@@ -102,7 +103,9 @@ class FakeNanoTrakLib:
         return 0
 
     def NT_GetCirclePosition(self, serial, position):  # noqa: N802
-        position._obj.horizontalComponent, position._obj.verticalComponent = self.position
+        # stale_position mimics the real DLL, whose report lags moves by a polling period
+        reported = self.stale_position if self.stale_position is not None else self.position
+        position._obj.horizontalComponent, position._obj.verticalComponent = reported
         return 0
 
     def NT_RequestReading(self, serial):  # noqa: N802
@@ -134,6 +137,19 @@ def test_default_polling_is_slow_enough_for_the_kna() -> None:
     """Regression: 20 ms polling froze the KNA's status/readings on hardware."""
     _dev, lib = _driver()
     assert lib.poll_ms == 200
+
+
+async def test_position_right_after_a_move_is_the_commanded_one() -> None:
+    """Regression: at 200 ms polling the device still reported the previous position."""
+    driver, lib = _driver()
+    lib.position = (32768, 32768)
+    lib.stale_position = (32768, 32768)
+    assert await driver.get_position_v() == pytest.approx((75.0, 75.0), abs=0.003)
+
+    await driver.move_to_v(105.0, 45.0)  # the device report stays stale
+
+    assert await driver.get_position_v() == pytest.approx((105.0, 45.0), abs=0.003)
+    assert lib.position == (driver._to_word(105.0), driver._to_word(45.0))
 
 
 def test_connect_opens_polls_and_latches() -> None:

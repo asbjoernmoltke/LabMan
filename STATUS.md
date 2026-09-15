@@ -77,7 +77,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] `examples/lab.sim.yaml` gains a simulated aligner; `examples/lab.kna.yaml` template for the real KNA
 - [x] Fixes found by the smoke test: `RunStorage` timestamp dirs no longer collide when two runs start within one second; both task widgets create storage inside `try`, so a storage error resets the UI instead of leaving Start disabled
 
-### Tests (256 passing)
+### Tests (257 passing)
 - [x] Storage: 5 tests (incl. runs started in the same second get `_1`, `_2` suffixes)
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
@@ -92,7 +92,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] Auto-alignment analysis: 11 tests (dip_in_ring / minimum / maximum / flat classification, coarse offset map finds nearest dip not background beyond ring, downhill walk, missing points, out-of-range zeros are not a dip, track summary)
 - [x] Auto-alignment widget: 5 tests (map run, graceful stop saves, second Stop force-cancels, hydrate, storage failure reports error and resets UI)
 - [x] Persistence: 4 tests (nested round trip incl. None/bool/empty arrays, unsupported type, params and meta JSON)
-- [x] KinesisNanoTrak (fake DLL): 24 tests (signal from relative reading × range full scale, garbage absolute ignored, unknown range retried then NaN; connect latches, default 200 ms polling, simulator flag, voltage-range refusal closes device, opt-in range switch 75→150 / 150→75 / mixed channels never exceeding the starting voltage, refusal above new range, switch that doesn't take, persist failure, no change without opt-in or when matching, open error, V ↔ device units, out-of-range move never sent, range flag, latch/identify/idempotent shutdown, controls, example yaml)
+- [x] KinesisNanoTrak (fake DLL): 25 tests (signal from relative reading × range full scale, garbage absolute ignored, unknown range retried then NaN; position right after a move is the commanded one; connect latches, default 200 ms polling, simulator flag, voltage-range refusal closes device, opt-in range switch 75→150 / 150→75 / mixed channels never exceeding the starting voltage, refusal above new range, switch that doesn't take, persist failure, no change without opt-in or when matching, open error, V ↔ device units, out-of-range move never sent, range flag, latch/identify/idempotent shutdown, controls, example yaml)
 - [x] Coupling-efficiency widget: 5 tests
 - [x] Coupling-efficiency safety: 8 tests (idempotency, missing laser, abort raises + cleans up, abort doesn't trigger when efficiency above threshold, safety on normal completion, safety on unhandled workflow error)
 - [x] Lab config: 12 tests (round trip, full config, bad version/role/sync_policy, missing driver, defaults/push_defaults rules, resource validation + duplicates)
@@ -125,7 +125,9 @@ KNA-IR hardware bring-up for `auto_alignment` (everything so far is verified aga
 - [x] With 200 ms polling the garbage `absoluteReading` (~1e-38) became frequent (a map discarded 267 readings, 77/121 points NaN, 19.5 s). The driver now takes the signal from `relativeReading / 32767 × range full scale` and ignores `absoluteReading`; unknown range codes are retried, then NaN out of range. Stored currents are ≈ 2.8× the KNA's absolute value (constant factor, consistent across ranges) and not calibrated in amps
 - [x] First complete map (2026-09-15, ±10 V × 11 points around 75/75 V, 1 reading, 9.7 s, 121/121 valid): a smooth slope, ~13–14 nA towards low H/low V down to ~8–9 nA towards high H/high V, no dip inside the map. The analysis' `dip_found` (a single point ~1 nA below its neighbours) is within point-to-point scatter
 - [ ] Map analysis: noise-aware dip detection (a single point below its neighbours by less than the scatter should not count as a dip)
-- [ ] Next on hardware: a wider map (e.g. ±30 V) while watching coupling efficiency, to see whether stray light turns up again (dip/ring) or keeps falling where the coupling drops
+- [x] Wide map (2026-09-15, ±30 V × 11 points, 0.15 s settle, 25 s, 121/121 valid): brightest towards low H + low V (~22–24 nA), lowest towards high V (~5–6 nA at V 99–105 V, H 63–75 V) and a low stretch near H 93 V; the hand-aligned start (12 nA) sits on the slope, not in a dip. After returning to 75/75 V the coupling efficiency was back where it started (piezo return is repeatable). Which direction is "good" is still unknown: coupling was not recorded during the scan
+- [x] Driver: position right after a move — the device report lags by a polling period (the ±30 V map "ended" at 105/105 V although it had returned to 75/75 V). `get_position_v` now returns the commanded position for max(1 s, 5 × poll) after a move; the range-switch check still reads the device
+- [ ] Record coupling during a map: log the output power meter alongside the KNA signal (needs the power meter bound in the task, or a second simultaneous acquisition), so stray light can be compared with coupling point by point
 - [ ] Driver: detect stale data — status with under-read and over-read both set, and identical readings/status over several requests — and raise instead of returning stale values
 - [x] Map analysis leaves out-of-range readings unmeasured (the KNA reports them as 0 A, which looked like a perfect dip) and walks downhill from the nearest measured point
 - [ ] Optionally set Kinesis' startup option for this KNA to use the device's stored settings instead of pushing its own (`LoadSettingsOption = 2`, "UseFileSettings", today), so opening Kinesis stops resetting the range

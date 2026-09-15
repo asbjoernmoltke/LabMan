@@ -22,16 +22,22 @@ class AutoAlignmentParams:
                          tooltip="Wait after each move before reading the detector.")
     ] = 0.02
     averages: Annotated[
-        int, ParamMeta(display="Readings per point", bounds=Range(1, 50), group="Probe")
+        int, ParamMeta(display="Readings per point", bounds=Range(1, 50), group="Probe",
+                       tooltip="Detector readings averaged per point (~50 ms each on the KNA). "
+                               "Single readings scatter ~2-3 %; 1 is fine for a quick map, "
+                               "tracking decisions need 3 or more.")
     ] = 3
+
+    # Defaults below are scaled to the K1S2P mount on the lab KNA-IR: a 20 V swing
+    # changed the stray-light signal by ~17 %, so sub-volt steps are invisible.
 
     # ----- map -----
     map_half_width_v: Annotated[
         float, ParamMeta(display="Half width", unit="V", bounds=Range(0.05, 20.0), group="Map")
-    ] = 2.0
+    ] = 10.0
     map_points: Annotated[
         int, ParamMeta(display="Points per axis", bounds=Range(3, 101), group="Map")
-    ] = 21
+    ] = 11
 
     # ----- tracking -----
     probe_radius_v: Annotated[
@@ -39,7 +45,7 @@ class AutoAlignmentParams:
                          group="Tracking",
                          tooltip="Radius of the probe circle around the centre. Must be small "
                                  "compared to the dip, or the ring is sampled instead.")
-    ] = 0.2
+    ] = 2.0
     probe_points: Annotated[
         int, ParamMeta(display="Probe points", bounds=Range(4, 64), group="Tracking")
     ] = 8
@@ -50,7 +56,7 @@ class AutoAlignmentParams:
     ] = 0.5
     max_step_v: Annotated[
         float, ParamMeta(display="Max step", unit="V", bounds=Range(0.001, 5.0), group="Tracking")
-    ] = 0.05
+    ] = 0.5
     min_contrast: Annotated[
         float, ParamMeta(display="Min dip contrast", bounds=Range(0.0, 1.0), group="Tracking",
                          tooltip="The centre must be this fraction below its surroundings to "
@@ -63,7 +69,7 @@ class AutoAlignmentParams:
                          group="Limits",
                          tooltip="Tracking stops (and holds the best position) rather than move "
                                  "further than this from the starting position.")
-    ] = 3.0
+    ] = 10.0
     duration_s: Annotated[
         float | None, ParamMeta(display="Stop after", unit="s", bounds=Range(1.0, 86400.0),
                                 optional=True, group="Limits",

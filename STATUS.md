@@ -124,7 +124,8 @@ KNA-IR hardware bring-up for `auto_alignment` (everything so far is verified aga
 - [ ] Units: `absoluteReading` ≈ 0.36 × (relative/32767 × range full scale) on every reading — confirm absolute is in A (e.g. a known photocurrent) or correct the scale. Tracking only needs monotonic signal, but stored values may be off by a constant factor
 - [ ] Auto-ranging is on (status bit 0x10): range switches mid-probe add steps and delay; consider a fixed TIA range during map/track
 - [ ] Run a **map** around the hand-aligned point and check `profile_shape` — confirms (or refutes) the dip-inside-ring picture before trusting tracking
-- [ ] Tune `probe_radius_v` together with `min_contrast` (dip contrast scales with radius²), then `gain` / `max_step_v`
+- [x] Defaults rescaled to the K1S2P response (~17 % signal change per 20 V): map ±10 V × 11 points, probe radius 2 V, max step 0.5 V, max excursion 10 V; readings per point stays 3 (single readings scatter ~2-3 %). Simulated aligner in `lab.sim.yaml` scaled to match (ring radius 8 V)
+- [ ] After the first map, tune `probe_radius_v` together with `min_contrast` (dip contrast scales with radius²), then `gain` / `max_step_v`
 - [ ] Consider periodic raw checkpoints for very long tracking runs (today a force-stop or crash loses that run's log)
 
 ---

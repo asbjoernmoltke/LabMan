@@ -32,15 +32,16 @@ devices:
     sync_policy: hydrate
 
   # Simulated KNA-IR for the auto-alignment task: cladding-light dip inside a
-  # bright ring, hand-aligned slightly off the optimum, slow drift.
+  # bright ring, hand-aligned slightly off the optimum, slow drift. Scaled like
+  # the real K1S2P mount (features on the ~10 V scale) to match the task defaults.
   aligner:
     driver: labman_core.simulators.SimAligner
     role: aligner
     args:
-      start_v: [75.3, 74.8]
+      start_v: [77.0, 73.5]
       optimum_v: [75.0, 75.0]
       profile: donut
-      ring_radius_v: 1.0
-      noise_rel: 0.01
-      drift_v_per_s: [0.002, -0.001]
+      ring_radius_v: 8.0
+      noise_rel: 0.02
+      drift_v_per_s: [0.02, -0.01]
     sync_policy: hydrate

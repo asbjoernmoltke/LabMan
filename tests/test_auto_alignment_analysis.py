@@ -117,6 +117,27 @@ def test_unmeasured_points_are_nan() -> None:
     assert np.isnan(m.signal_a).sum() == 1
 
 
+def test_out_of_range_zeros_are_not_a_dip() -> None:
+    """Regression (KNA-IR 2026-09-15): out-of-range readings come back as 0 A.
+
+    They must be left unmeasured, not taken as the dip bottom.
+    """
+    bowl = _radial(lambda r: 1e-9 + 1e-10 * r**2)
+    raw = _map_raw(bowl, n=9, start=(76.0, 75.0))
+    # Blank the points around the start but not the true bottom at START (1 V away).
+    near_start = np.hypot(raw.sample_h_v - 76.0, raw.sample_v_v - 75.0) < 0.8
+    raw.sample_signal_a[near_start] = 0.0
+    raw.sample_in_range[near_start] = False
+
+    m = analyze(raw, AutoAlignmentParams()).map
+
+    assert np.isnan(m.signal_a).sum() == int(near_start.sum())
+    assert m.min_signal_a > 0
+    assert m.local_min_signal_a > 0
+    assert m.dip_found
+    assert m.local_min_v == pytest.approx(START)
+
+
 def test_classify_profile_needs_three_points() -> None:
     assert classify_profile(np.array([1.0, 2.0])) == "unknown"
 

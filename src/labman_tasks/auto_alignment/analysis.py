@@ -21,7 +21,9 @@ def analyze(raw: AutoAlignmentRawData, params: AutoAlignmentParams) -> AutoAlign
 def analyze_map(raw: AutoAlignmentRawData) -> AlignmentMap:
     h_axis, v_axis = raw.map_h_axis_v, raw.map_v_axis_v
     grid = np.full((v_axis.size, h_axis.size), np.nan)
-    mask = raw.sample_kind == KIND_MAP
+    # Out-of-range readings are not measurements: the KNA reports them as 0 A, which
+    # would look like a perfect dip. Leave those grid points unmeasured (NaN).
+    mask = (raw.sample_kind == KIND_MAP) & raw.sample_in_range.astype(bool)
     grid[raw.sample_map_j[mask], raw.sample_map_i[mask]] = raw.sample_signal_a[mask]
 
     if np.all(np.isnan(grid)):
@@ -36,7 +38,7 @@ def analyze_map(raw: AutoAlignmentRawData) -> AlignmentMap:
     jm, im = np.unravel_index(np.nanargmin(grid), grid.shape)
     js = int(np.argmin(np.abs(v_axis - raw.start_v[1])))
     is_ = int(np.argmin(np.abs(h_axis - raw.start_v[0])))
-    jl, il = descend_to_local_minimum(grid, (js, is_))
+    jl, il = descend_to_local_minimum(grid, nearest_measured(grid, h_axis, v_axis, raw.start_v))
     local_min_v = np.array([h_axis[il], v_axis[jl]])
     # Downhill ending on the edge means the signal keeps falling out of the map:
     # there is no dip inside it, so describe the landscape around the start.
@@ -58,6 +60,17 @@ def analyze_map(raw: AutoAlignmentRawData) -> AlignmentMap:
         radial_signal_a=radial_s,
         profile_shape=classify_profile(radial_s),
     )
+
+
+def nearest_measured(
+    grid: np.ndarray, h_axis: np.ndarray, v_axis: np.ndarray, position_v: np.ndarray
+) -> tuple[int, int]:
+    """Grid index of the measured point closest to `position_v` (grid not all NaN)."""
+    hh, vv = np.meshgrid(h_axis, v_axis)
+    r = np.hypot(hh - position_v[0], vv - position_v[1])
+    r[np.isnan(grid)] = np.inf
+    j, i = np.unravel_index(np.argmin(r), grid.shape)
+    return int(j), int(i)
 
 
 def descend_to_local_minimum(grid: np.ndarray, start: tuple[int, int]) -> tuple[int, int]:

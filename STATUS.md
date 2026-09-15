@@ -77,7 +77,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] `examples/lab.sim.yaml` gains a simulated aligner; `examples/lab.kna.yaml` template for the real KNA
 - [x] Fixes found by the smoke test: `RunStorage` timestamp dirs no longer collide when two runs start within one second; both task widgets create storage inside `try`, so a storage error resets the UI instead of leaving Start disabled
 
-### Tests (255 passing)
+### Tests (256 passing)
 - [x] Storage: 5 tests (incl. runs started in the same second get `_1`, `_2` suffixes)
 - [x] Analysis: 3 tests
 - [x] Workflow E2E: 5 tests
@@ -89,7 +89,7 @@ Last updated: 2026-09-14 (auto-alignment task, KNA-IR driver)
 - [x] SimAligner: 10 tests (profiles, bounds, drift, noise, controls)
 - [x] Auto-alignment algorithm: 12 tests (Newton step, gain/clip, steps inside donut dip, holds on ring/flat/out-of-range/degenerate, clipped probes, limits, serpentine map)
 - [x] Auto-alignment workflow + safety: 13 tests (map saves/returns to start, saved raw re-analyzes identically, stop during map, tracking converges and latches at best, follows drift, holds on ring, excursion limit, duration, cancellation, device error, safe state idempotent/non-raising, task delegate latches in place)
-- [x] Auto-alignment analysis: 10 tests (dip_in_ring / minimum / maximum / flat classification, coarse offset map finds nearest dip not background beyond ring, downhill walk, missing points, track summary)
+- [x] Auto-alignment analysis: 11 tests (dip_in_ring / minimum / maximum / flat classification, coarse offset map finds nearest dip not background beyond ring, downhill walk, missing points, out-of-range zeros are not a dip, track summary)
 - [x] Auto-alignment widget: 5 tests (map run, graceful stop saves, second Stop force-cancels, hydrate, storage failure reports error and resets UI)
 - [x] Persistence: 4 tests (nested round trip incl. None/bool/empty arrays, unsupported type, params and meta JSON)
 - [x] KinesisNanoTrak (fake DLL): 24 tests (connect latches, simulator flag, voltage-range refusal closes device, opt-in range switch 75→150 / 150→75 / mixed channels never exceeding the starting voltage, refusal above new range, switch that doesn't take, persist failure, no change without opt-in or when matching, open error, V ↔ device units, out-of-range move never sent, range flag, garbage reading retried / persistent → NaN out of range / constant scale mismatch and dark readings accepted, latch/identify/idempotent shutdown, controls, example yaml)
@@ -120,6 +120,10 @@ KNA-IR hardware bring-up for `auto_alignment` (everything so far is verified aga
 - [x] Latch-mode moves reach the piezos (2026-09-14): a 20 V peak-to-peak horizontal swing (1 s dwell, 10 cycles) modulated the stray-light signal ~4.1 ↔ ~4.8 nA in lock with every cycle. Steps of 0.1–5 V were too small to notice by eye or in coupling efficiency
 - [x] Kinesis resets the HV output range to 75 V whenever it connects (its built-in defaults). Driver opt-in `set_voltage_range: true` (on in `lab.kna.yaml`) switches the range on connect without ever raising the real output voltage (lower-then-switch for channels going up, switch-then-raise for channels going down), refuses if an output is above the new range, persists with `NT_PersistSettings`, and verifies range + position. Tested against the fake DLL only
 - [x] Range switch on hardware (2026-09-15): Kinesis had left 75 V with outputs at mid-scale (37.5 V real). Connecting with `set_voltage_range: true` switched to 150 V in ~1 s (3 s connect in total), kept H/V at 37.50 V (words 32768 → 16384), and the range persisted across a fresh connect. Stray-light signal 4.71 → 5.17 nA (±0.15) across the switch; possibly piezo hysteresis from the ~1 s dip to 18.75 V — to be confirmed against the coupling
+- [x] Piezos moved to 75 V / 75 V (mid-range) for a hand re-alignment there (2026-09-15). Kinesis had probably also reset the outputs to mid-scale of its 75 V range (37.5 V)
+- [ ] **KNA stops delivering fresh data (2026-09-15), intermittently.** Symptoms: readings frozen at one value, status bits frozen at an impossible value (0x001c0665: tracking + under-read + over-read, channels not connected), or all-zero status/readings (out of range) for seconds after connect. The first map got 76/121 out-of-range zeros, the second map 121 identical readings. A USB replug recovers it; it also recovered by itself once. No other process holds the device and Kinesis logs show nothing. Suspects: the external USB2514 hub between laptop and KNA, and USB selective suspend (enabled on AC and DC). Next: connect the KNA directly to the laptop and/or disable selective suspend, then run `freeze_trigger` (move-rate test) and a map
+- [ ] Driver: detect stale data — status with under-read and over-read both set, and identical readings/status over several requests — and raise instead of returning stale values
+- [x] Map analysis leaves out-of-range readings unmeasured (the KNA reports them as 0 A, which looked like a perfect dip) and walks downhill from the nearest measured point
 - [ ] Optionally set Kinesis' startup option for this KNA to use the device's stored settings instead of pushing its own (`LoadSettingsOption = 2`, "UseFileSettings", today), so opening Kinesis stops resetting the range
 - [ ] Units: `absoluteReading` ≈ 0.36 × (relative/32767 × range full scale) on every reading — confirm absolute is in A (e.g. a known photocurrent) or correct the scale. Tracking only needs monotonic signal, but stored values may be off by a constant factor
 - [ ] Auto-ranging is on (status bit 0x10): range switches mid-probe add steps and delay; consider a fixed TIA range during map/track
